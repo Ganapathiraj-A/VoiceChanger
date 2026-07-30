@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Changer - A/B Audio Comparison Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0b0f19;
+      --panel-bg: rgba(18, 26, 43, 0.75);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --accent-a: #00f2fe;
+      --accent-a-glow: rgba(0, 242, 254, 0.35);
+      --accent-b: #ff007f;
+      --accent-b-glow: rgba(255, 0, 127, 0.35);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 15% 20%, rgba(0, 242, 254, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 80%, rgba(255, 0, 127, 0.08) 0%, transparent 40%);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    header h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent-a), #4facfe, var(--accent-b));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+      margin-bottom: 0.5rem;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 950px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: var(--panel-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      padding: 1.8rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    /* File Selection */
+    .file-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 768px) {
+      .file-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .file-box {
+      border: 2px dashed rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 1.2rem;
+      text-align: center;
+      transition: all 0.3s ease;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .file-box.active-a {
+      border-color: var(--accent-a);
+      box-shadow: 0 0 20px var(--accent-a-glow);
+    }
+
+    .file-box.active-b {
+      border-color: var(--accent-b);
+      box-shadow: 0 0 20px var(--accent-b-glow);
+    }
+
+    .file-box h3 {
+      font-size: 1.1rem;
+      margin-bottom: 0.8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 3px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .badge-a { background: rgba(0, 242, 254, 0.15); color: var(--accent-a); border: 1px solid var(--accent-a); }
+    .badge-b { background: rgba(255, 0, 127, 0.15); color: var(--accent-b); border: 1px solid var(--accent-b); }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .btn-file {
+      display: inline-block;
+      padding: 0.6rem 1.2rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      color: var(--text-main);
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.9rem;
+      transition: background 0.2s ease;
+    }
+
+    .btn-file:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .file-name {
+      margin-top: 0.8rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      word-break: break-all;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Active Indicator Banner */
+    .status-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.2rem 1.5rem;
+      border-radius: 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .speaker-indicator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      opacity: 0.4;
+      transition: opacity 0.3s ease;
+    }
+
+    .playing-a #indA { opacity: 1; }
+    .playing-b #indB { opacity: 1; }
+
+    .indicator-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #475569;
+      transition: all 0.3s ease;
+    }
+
+    .playing-a .indicator-dot-a {
+      background: var(--accent-a);
+      box-shadow: 0 0 16px var(--accent-a);
+      animation: pulse 1s infinite alternate;
+    }
+
+    .playing-b .indicator-dot-b {
+      background: var(--accent-b);
+      box-shadow: 0 0 16px var(--accent-b);
+      animation: pulse 1s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { transform: scale(1); }
+      to { transform: scale(1.3); }
+    }
+
+    .timer-countdown {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.1rem;
+      color: var(--text-muted);
+    }
+
+    .timer-countdown span {
+      color: var(--text-main);
+      font-weight: 700;
+    }
+
+    /* Waveform Canvas */
+    .visualizer-box {
+      width: 100%;
+      height: 100px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 14px;
+      overflow: hidden;
+      margin: 1.2rem 0;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Controls & Timeline */
+    .timeline-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .progress-bar-wrap {
+      width: 100%;
+      height: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+      border-radius: 8px;
+      transition: width 0.1s linear;
+    }
+
+    .segment-markers {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      display: flex;
+    }
+
+    .segment-block {
+      height: 100%;
+      border-right: 1px solid rgba(0, 0, 0, 0.5);
+    }
+
+    .segment-block:nth-child(odd) {
+      background: rgba(0, 242, 254, 0.12);
+    }
+
+    .segment-block:nth-child(even) {
+      background: rgba(255, 0, 127, 0.12);
+    }
+
+    .time-display {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 1.5rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .btn-main {
+      padding: 0.8rem 1.8rem;
+      border: none;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-play {
+      background: linear-gradient(135deg, var(--accent-a), #00b4d8);
+      color: #000;
+      box-shadow: 0 10px 25px var(--accent-a-glow);
+    }
+
+    .btn-play:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px var(--accent-a-glow);
+    }
+
+    .btn-sec {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-sec:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .interval-selector {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    select {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      padding: 0.5rem 1rem;
+      border-radius: 10px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .shortcut-tip {
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    kbd {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Voice Changer A/B Tester</h1>
+    <p>Compare Original vs Converted Audio with Automated 10-Second Alternating Playback</p>
+  </header>
+
+  <div class="container">
+
+    <!-- File Selection Grid -->
+    <div class="card file-grid">
+      <div class="file-box" id="boxA">
+        <h3><span class="badge badge-a">File A</span> Original Track</h3>
+        <label class="btn-file">
+          Select Original Audio / Video
+          <input type="file" id="inputA" accept="audio/*,video/*">
+        </label>
+        <div class="file-name" id="fileNameA">Default: Sample/original_WhatsApp Audio 2026-07-28 at 10.43.52.mp4</div>
+      </div>
+
+      <div class="file-box" id="boxB">
+        <h3><span class="badge badge-b">File B</span> Converted Output</h3>
+        <label class="btn-file">
+          Select Converted Audio
+          <input type="file" id="inputB" accept="audio/*,video/*">
+        </label>
+        <div class="file-name" id="fileNameB">Default: output/original_WhatsApp Audio 2026-07-28 at 10.43.52.mp3</div>
+      </div>
+    </div>
+
+    <!-- Active Speaker & Status Monitor -->
+    <div class="card">
+      <div class="status-banner" id="statusBanner">
+        <div class="speaker-indicator" id="indA">
+          <div class="indicator-dot indicator-dot-a"></div>
+          <span>PLAYING: FILE A (ORIGINAL)</span>
+        </div>
+
+        <div class="speaker-indicator" id="indB">
+          <div class="indicator-dot indicator-dot-b"></div>
+          <span>PLAYING: FILE B (CONVERTED)</span>
+        </div>
+
+        <div class="timer-countdown">
+          Switch in: <span id="countdownSec">10.0</span>s
+        </div>
+      </div>
+
+      <!-- Waveform Visualizer -->
+      <div class="visualizer-box">
+        <canvas id="visualizerCanvas"></canvas>
+      </div>
+
+      <!-- Timeline & Progress -->
+      <div class="timeline-container">
+        <div class="progress-bar-wrap" id="progressBar">
+          <div class="segment-markers" id="segmentMarkers"></div>
+          <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+        <div class="time-display">
+          <span id="currentTime">00:00</span>
+          <span id="totalTime">00:00</span>
+        </div>
+      </div>
+
+      <!-- Playback Controls -->
+      <div class="controls-row">
+        <div style="display: flex; gap: 10px;">
+          <button class="btn-main btn-play" id="btnPlay">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Play Comparison
+          </button>
+
+          <button class="btn-main btn-sec" id="btnRewind">
+            -10s
+          </button>
+          
+          <button class="btn-main btn-sec" id="btnForward">
+            +10s
+          </button>
+        </div>
+
+        <div class="interval-selector">
+          <label for="intervalSelect">Switch Interval:</label>
+          <select id="intervalSelect">
+            <option value="5">5 Seconds</option>
+            <option value="10" selected>10 Seconds</option>
+            <option value="15">15 Seconds</option>
+            <option value="20">20 Seconds</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="shortcut-tip">
+        Press <kbd>Space</kbd> to Play/Pause | Press <kbd>←</kbd> <kbd>→</kbd> to Skip 10s | Press <kbd>A</kbd> or <kbd>B</kbd> to manual switch track
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const btnPlay = document.getElementById('btnPlay');
+    const btnRewind = document.getElementById('btnRewind');
+    const btnForward = document.getElementById('btnForward');
+    const intervalSelect = document.getElementById('intervalSelect');
+    
+    const inputA = document.getElementById('inputA');
+    const inputB = document.getElementById('inputB');
+    const fileNameA = document.getElementById('fileNameA');
+    const fileNameB = document.getElementById('fileNameB');
+    
+    const boxA = document.getElementById('boxA');
+    const boxB = document.getElementById('boxB');
+    const statusBanner = document.getElementById('statusBanner');
+    const bannerText = document.getElementById('bannerText');
+    
+    const countdownSec = document.getElementById('countdownSec');
+    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
+    const segmentMarkers = document.getElementById('segmentMarkers');
+    const currentTimeEl = document.getElementById('currentTime');
+    const totalTimeEl = document.getElementById('totalTime');
+    const canvas = document.getElementById('visualizerCanvas');
+    const canvasCtx = canvas.getContext('2d');
+
+    // Web Audio API State
+    let audioCtx = null;
+    let bufferA = null;
+    let bufferB = null;
+    let sourceA = null;
+    let sourceB = null;
+    let gainA = null;
+    let gainB = null;
+    let analyserNode = null;
+
+    let isPlaying = false;
+    let isLoaded = false;
+    let activeTrack = 'A';
+    let switchInterval = 10;
+    let currentOffset = 0; // seconds into track
+    let playbackStartTime = 0; // audioCtx.currentTime when started
+    let totalDuration = 591.6;
+
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+        analyserNode = audioCtx.createAnalyser();
+        analyserNode.fftSize = 64;
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    async function loadAudioFile(url) {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      initAudioContext();
+      return await audioCtx.decodeAudioData(arrayBuffer);
+    }
+
+    async function loadDefaultTracks() {
+      bannerText.textContent = "Loading audio tracks into memory...";
+      try {
+        const [bufA, bufB] = await Promise.all([
+          loadAudioFile("Sample/original_WhatsApp Audio 2026-07-28 at 10.43.52.mp4"),
+          loadAudioFile("output/original_WhatsApp Audio 2026-07-28 at 10.43.52.mp3")
+        ]);
+        bufferA = bufA;
+        bufferB = bufB;
+        totalDuration = Math.max(bufferA.duration, bufferB.duration);
+        isLoaded = true;
+        bannerText.textContent = "Tracks Ready! Press Play to start comparison.";
+        renderSegmentMarkers();
+      } catch (e) {
+        console.error("Error loading audio files:", e);
+        bannerText.textContent = "Error loading audio files. Check browser console.";
+      }
+    }
+
+    inputA.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        fileNameA.textContent = file.name;
+        initAudioContext();
+        bannerText.textContent = `Loading ${file.name}...`;
+        const ab = await file.arrayBuffer();
+        bufferA = await audioCtx.decodeAudioData(ab);
+        totalDuration = Math.max(bufferA ? bufferA.duration : 0, bufferB ? bufferB.duration : 0);
+        bannerText.textContent = "File A Updated!";
+        if (isPlaying) {
+          restartPlaybackAt(currentOffset);
+        }
+        renderSegmentMarkers();
+      }
+    });
+
+    inputB.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        fileNameB.textContent = file.name;
+        initAudioContext();
+        bannerText.textContent = `Loading ${file.name}...`;
+        const ab = await file.arrayBuffer();
+        bufferB = await audioCtx.decodeAudioData(ab);
+        totalDuration = Math.max(bufferA ? bufferA.duration : 0, bufferB ? bufferB.duration : 0);
+        bannerText.textContent = "File B Updated!";
+        if (isPlaying) {
+          restartPlaybackAt(currentOffset);
+        }
+        renderSegmentMarkers();
+      }
+    });
+
+    loadDefaultTracks();
+
+    function stopSources() {
+      if (sourceA) {
+        try { sourceA.stop(); } catch(e){}
+        try { sourceA.disconnect(); } catch(e){}
+        sourceA = null;
+      }
+      if (sourceB) {
+        try { sourceB.stop(); } catch(e){}
+        try { sourceB.disconnect(); } catch(e){}
+        sourceB = null;
+      }
+    }
+
+    function startSources(offsetSec) {
+      if (!isLoaded || !bufferA || !bufferB) return;
+      initAudioContext();
+      stopSources();
+
+      sourceA = audioCtx.createBufferSource();
+      sourceB = audioCtx.createBufferSource();
+      sourceA.buffer = bufferA;
+      sourceB.buffer = bufferB;
+
+      gainA = audioCtx.createGain();
+      gainB = audioCtx.createGain();
+
+      // Initial gain levels
+      const segIdx = Math.floor(offsetSec / switchInterval);
+      activeTrack = (segIdx % 2 === 0) ? 'A' : 'B';
+      gainA.gain.value = (activeTrack === 'A') ? 1.0 : 0.0;
+      gainB.gain.value = (activeTrack === 'B') ? 1.0 : 0.0;
+
+      sourceA.connect(gainA);
+      gainA.connect(analyserNode);
+
+      sourceB.connect(gainB);
+      gainB.connect(analyserNode);
+
+      analyserNode.connect(audioCtx.destination);
+
+      playbackStartTime = audioCtx.currentTime - offsetSec;
+      currentOffset = offsetSec;
+
+      sourceA.start(0, offsetSec);
+      sourceB.start(0, offsetSec);
+
+      updateUIBanner(activeTrack);
+    }
+
+    function restartPlaybackAt(offsetSec) {
+      currentOffset = offsetSec;
+      if (isPlaying) {
+        startSources(currentOffset);
+      }
+    }
+
+    function togglePlay() {
+      if (!isLoaded) return;
+      if (isPlaying) {
+        pauseAudio();
+      } else {
+        playAudio();
+      }
+    }
+
+    function playAudio() {
+      if (!isLoaded) return;
+      isPlaying = true;
+      btnPlay.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> Pause`;
+      startSources(currentOffset);
+    }
+
+    function pauseAudio() {
+      if (isPlaying && audioCtx) {
+        currentOffset = Math.min(totalDuration, audioCtx.currentTime - playbackStartTime);
+      }
+      isPlaying = false;
+      btnPlay.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play Comparison`;
+      stopSources();
+    }
+
+    function updateUIBanner(track) {
+      if (track === 'A') {
+        statusBanner.className = 'status-banner playing-a';
+        boxA.className = 'file-box active-a';
+        boxB.className = 'file-box';
+        bannerText.textContent = "PLAYING: FILE A (Original Target Preserved)";
+      } else {
+        statusBanner.className = 'status-banner playing-b';
+        boxA.className = 'file-box';
+        boxB.className = 'file-box active-b';
+        bannerText.textContent = "PLAYING: FILE B (Converted Voice - Gender Changed)";
+      }
+    }
+
+    function updateLoop() {
+      if (isPlaying && audioCtx) {
+        const curTime = audioCtx.currentTime - playbackStartTime;
+        currentOffset = curTime;
+
+        if (curTime >= totalDuration) {
+          pauseAudio();
+          currentOffset = 0;
+        } else {
+          switchInterval = parseFloat(intervalSelect.value);
+          const segmentIndex = Math.floor(curTime / switchInterval);
+          const neededTrack = (segmentIndex % 2 === 0) ? 'A' : 'B';
+
+          if (neededTrack !== activeTrack) {
+            activeTrack = neededTrack;
+            const now = audioCtx.currentTime;
+            if (activeTrack === 'A') {
+              gainA.gain.setTargetAtTime(1.0, now, 0.01);
+              gainB.gain.setTargetAtTime(0.0, now, 0.01);
+            } else {
+              gainA.gain.setTargetAtTime(0.0, now, 0.01);
+              gainB.gain.setTargetAtTime(1.0, now, 0.01);
+            }
+            updateUIBanner(activeTrack);
+          }
+
+          // Countdown to next switch
+          const nextSwitchTime = (segmentIndex + 1) * switchInterval;
+          const timeRemaining = Math.max(0, nextSwitchTime - curTime);
+          countdownSec.textContent = timeRemaining.toFixed(1);
+        }
+      }
+
+      if (totalDuration > 0) {
+        const percent = (currentOffset / totalDuration) * 100;
+        progressFill.style.width = percent + '%';
+        currentTimeEl.textContent = formatTime(currentOffset);
+        totalTimeEl.textContent = formatTime(totalDuration);
+      }
+
+      drawVisualizer();
+      requestAnimationFrame(updateLoop);
+    }
+
+    function formatTime(sec) {
+      const m = Math.floor(Math.max(0, sec) / 60);
+      const s = Math.floor(Math.max(0, sec) % 60);
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function renderSegmentMarkers() {
+      segmentMarkers.innerHTML = '';
+      if (!totalDuration || totalDuration <= 0) return;
+
+      switchInterval = parseFloat(intervalSelect.value);
+      const numSegments = Math.ceil(totalDuration / switchInterval);
+
+      for (let i = 0; i < numSegments; i++) {
+        const block = document.createElement('div');
+        block.className = 'segment-block';
+        block.style.width = `${(switchInterval / totalDuration) * 100}%`;
+        segmentMarkers.appendChild(block);
+      }
+    }
+
+    intervalSelect.addEventListener('change', renderSegmentMarkers);
+
+    progressBar.addEventListener('click', (e) => {
+      const rect = progressBar.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      if (totalDuration > 0) {
+        const seekTime = (clickX / rect.width) * totalDuration;
+        restartPlaybackAt(seekTime);
+      }
+    });
+
+    function drawVisualizer() {
+      canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!isPlaying || !analyserNode) return;
+
+      const bufferLength = analyserNode.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyserNode.getByteFrequencyData(dataArray);
+
+      const numBars = 32;
+      const barWidth = canvas.width / numBars;
+      const barColor = (activeTrack === 'A') ? '#00f2fe' : '#ff007f';
+
+      for (let i = 0; i < numBars; i++) {
+        const val = dataArray[i * 2] || 0;
+        const h = (val / 255.0) * (canvas.height * 0.85) + 4;
+        canvasCtx.fillStyle = barColor;
+        canvasCtx.fillRect(i * barWidth, canvas.height - h, barWidth - 3, h);
+      }
+    }
+
+    btnPlay.addEventListener('click', togglePlay);
+
+    btnRewind.addEventListener('click', () => {
+      restartPlaybackAt(Math.max(0, currentOffset - 10));
+    });
+
+    btnForward.addEventListener('click', () => {
+      restartPlaybackAt(Math.min(totalDuration, currentOffset + 10));
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowLeft') {
+        btnRewind.click();
+      } else if (e.code === 'ArrowRight') {
+        btnForward.click();
+      } else if (e.code === 'KeyA') {
+        activeTrack = 'A';
+        if (audioCtx) {
+          gainA.gain.setTargetAtTime(1.0, audioCtx.currentTime, 0.01);
+          gainB.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.01);
+          updateUIBanner('A');
+        }
+      } else if (e.code === 'KeyB') {
+        activeTrack = 'B';
+        if (audioCtx) {
+          gainA.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.01);
+          gainB.gain.setTargetAtTime(1.0, audioCtx.currentTime, 0.01);
+          updateUIBanner('B');
+        }
+      }
+    });
+
+    requestAnimationFrame(updateLoop);
+  </script>
+</body>
+</html>

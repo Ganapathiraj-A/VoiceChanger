@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local audio input/output/test media files
+input/
+output/
+debug_clips/
+*.wav
+*.mp3
+*.mp4
+!Sample/*
+
+# Pretrained local models (pre-cached in Docker)
+pretrained_models/
+
+# Android build outputs
+VoiceChangerApp/.gradle/
+VoiceChangerApp/app/build/
+VoiceChangerApp/build/
+VoiceChangerApp/local.properties
+VoiceChangerApp/.idea/
