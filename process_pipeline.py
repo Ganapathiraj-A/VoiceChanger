@@ -68,17 +68,18 @@ def process_audio_file(
     if len(valid_segments) == 0:
         valid_segments = segments
 
-    # Sub-sample up to 15 segments max for instant classification
+    # Sub-sample up to 8 segments max for instant classification
     tot_segs = len(valid_segments)
-    if tot_segs > 15:
-        step_idx = max(1, tot_segs // 15)
+    if tot_segs > 8:
+        step_idx = max(1, tot_segs // 8)
         eval_indices = set(range(0, tot_segs, step_idx))
     else:
         eval_indices = set(range(tot_segs))
 
     classified = []
     for i, seg in enumerate(valid_segments):
-        _report_progress(15.0 + ((i + 1) / max(1, tot_segs)) * 20.0, f"Classifying speakers ({i+1}/{tot_segs})...")
+        if i in eval_indices or i % 25 == 0 or i == tot_segs - 1:
+            _report_progress(15.0 + ((i + 1) / max(1, tot_segs)) * 20.0, f"Classifying speakers ({i+1}/{tot_segs})...")
         seg_audio = seg['audio_data']
         dur = len(seg_audio) / sr
         
