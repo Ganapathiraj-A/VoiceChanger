@@ -35,9 +35,14 @@ def load_audio_mono(audio_path, target_sr=16000):
     try:
         audio_seg = AudioSegment.from_file(audio_path).set_frame_rate(target_sr).set_channels(1)
         samples = np.array(audio_seg.get_array_of_samples(), dtype=np.float32) / 32768.0
-        return samples, target_sr
     except Exception:
         return librosa.load(audio_path, sr=target_sr)
+
+
+def load_target_profile(path="target_speaker_profile.npy"):
+    if os.path.exists(path):
+        return np.load(path)
+    return np.zeros(195, dtype=np.float32)
 
 
 def extract_embedding(audio_path_or_ndarray, sr=16000):
