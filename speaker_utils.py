@@ -167,12 +167,13 @@ def segment_audio_vad(audio_path, top_db=30, min_speech_duration_ms=300, max_chu
     try:
         import uuid
         temp_wav = os.path.join(tempfile.gettempdir(), f"vad_{uuid.uuid4().hex}.wav")
-        cmd = ["ffmpeg", "-y", "-i", audio_path, "-ac", "1", "-ar", "16000", temp_wav]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        cmd = ["ffmpeg", "-y", "-vn", "-i", audio_path, "-ac", "1", "-ar", "16000", temp_wav]
+        res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0 and os.path.exists(temp_wav):
             y, sr = sf.read(temp_wav)
             try: os.remove(temp_wav)
             except Exception: pass
+            print(f"[VAD] Successfully extracted 16kHz mono WAV via FFmpeg ({len(y)} samples)", flush=True)
         else:
             print(f"[VAD] FFmpeg error: {res.stderr[:200]}", flush=True)
             y, sr = librosa.load(audio_path, sr=16000, mono=True)
