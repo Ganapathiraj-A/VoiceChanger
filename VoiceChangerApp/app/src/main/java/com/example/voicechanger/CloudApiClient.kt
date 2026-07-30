@@ -77,7 +77,7 @@ i+fozqmCTkpHUig37W5sLesojw==
     @Volatile
     private var tokenExpiryTimeSec: Long = 0
 
-    private fun getGcpIdToken(): String {
+    private fun getGcpIdToken(context: Context): String {
         val nowSec = System.currentTimeMillis() / 1000
         val token = cachedIdToken
         if (token != null && nowSec < tokenExpiryTimeSec - 120) {
@@ -89,6 +89,8 @@ i+fozqmCTkpHUig37W5sLesojw==
             if (curToken != null && nowSec < tokenExpiryTimeSec - 120) {
                 return curToken
             }
+
+            LogManager.i(context, "AUTH", "Generating new GCP RSA OIDC token...")
 
             val headerJson = JSONObject().apply {
                 put("alg", "RS256")
@@ -124,13 +126,16 @@ i+fozqmCTkpHUig37W5sLesojw==
 
             client.newCall(tokenReq).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    throw Exception("Auth token request failed: HTTP ${resp.code}")
+                    val errMsg = "Auth token request failed: HTTP ${resp.code}"
+                    LogManager.e(context, "AUTH", errMsg)
+                    throw Exception(errMsg)
                 }
                 val respStr = resp.body?.string() ?: ""
                 val json = JSONObject(respStr)
                 val newIdToken = json.getString("id_token")
                 cachedIdToken = newIdToken
                 tokenExpiryTimeSec = nowSec + 3000
+                LogManager.i(context, "AUTH", "Successfully obtained GCP OIDC Token")
                 return newIdToken
             }
         }
@@ -158,13 +163,19 @@ i+fozqmCTkpHUig37W5sLesojw==
 
     suspend fun submitJob(context: Context, fileUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val idToken = getGcpIdToken()
+            val idToken = getGcpIdToken(context)
             val fileName = getFileName(context, fileUri) ?: "input_audio.mp3"
-            val inputStream: InputStream = context.contentResolver.openInputStream(fileUri)
-                ?: return@withContext Result.failure(Exception("Cannot open audio file stream"))
+            LogManager.i(context, "JOB", "Submitting file: $fileName")
+
+            val inputStream: InputStream? = context.contentResolver.openInputStream(fileUri)
+            if (inputStream == null) {
+                LogManager.e(context, "JOB", "Cannot open input stream for $fileUri")
+                return@withContext Result.failure<String>(Exception("Cannot open audio file stream"))
+            }
 
             val bytes = inputStream.readBytes()
             inputStream.close()
+            LogManager.i(context, "JOB", "File size read: ${bytes.size} bytes")
 
             val mediaType = (context.contentResolver.getType(fileUri) ?: "audio/mpeg").toMediaTypeOrNull()
 
@@ -185,21 +196,25 @@ i+fozqmCTkpHUig37W5sLesojw==
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("HTTP Error: ${response.code}"))
+                    val err = "Job submit failed HTTP ${response.code}"
+                    LogManager.e(context, "JOB", err)
+                    return@withContext Result.failure(Exception(err))
                 }
                 val bodyStr = response.body?.string() ?: ""
                 val json = JSONObject(bodyStr)
                 val jobId = json.getString("job_id")
+                LogManager.i(context, "JOB", "Job submitted successfully! Job ID: $jobId")
                 Result.success(jobId)
             }
         } catch (e: Exception) {
+            LogManager.e(context, "JOB", "Submit exception", e)
             Result.failure(e)
         }
     }
 
-    suspend fun pollJobStatus(jobId: String): Result<JobStatusResponse> = withContext(Dispatchers.IO) {
+    suspend fun pollJobStatus(context: Context, jobId: String): Result<JobStatusResponse> = withContext(Dispatchers.IO) {
         try {
-            val idToken = getGcpIdToken()
+            val idToken = getGcpIdToken(context)
             val request = Request.Builder()
                 .url("$DIRECT_CLOUD_URL/jobs/$jobId")
                 .header("Authorization", "Bearer $idToken")
@@ -208,7 +223,9 @@ i+fozqmCTkpHUig37W5sLesojw==
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("HTTP Error: ${response.code}"))
+                    val err = "Poll status failed HTTP ${response.code}"
+                    LogManager.e(context, "POLL", err)
+                    return@withContext Result.failure(Exception(err))
                 }
                 val bodyStr = response.body?.string() ?: ""
                 val json = JSONObject(bodyStr)
@@ -220,16 +237,19 @@ i+fozqmCTkpHUig37W5sLesojw==
                 val msg = json.optString("status_msg", "Processing audio...")
                 val filename = json.optString("filename", null)
 
+                LogManager.d(context, "POLL", "Status=$status, Pct=${pct}%, ETA=${eta}s, Msg=$msg")
                 Result.success(JobStatusResponse(status, pct, eta, elapsed, msg, filename))
             }
         } catch (e: Exception) {
+            LogManager.e(context, "POLL", "Poll exception", e)
             Result.failure(e)
         }
     }
 
     suspend fun downloadAndSaveResult(context: Context, jobId: String, originalFileName: String): Result<File> = withContext(Dispatchers.IO) {
         try {
-            val idToken = getGcpIdToken()
+            val idToken = getGcpIdToken(context)
+            LogManager.i(context, "DOWNLOAD", "Downloading result for job $jobId...")
             val request = Request.Builder()
                 .url("$DIRECT_CLOUD_URL/jobs/$jobId/download")
                 .header("Authorization", "Bearer $idToken")
@@ -238,7 +258,9 @@ i+fozqmCTkpHUig37W5sLesojw==
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("Download failed HTTP ${response.code}"))
+                    val err = "Download failed HTTP ${response.code}"
+                    LogManager.e(context, "DOWNLOAD", err)
+                    return@withContext Result.failure(Exception(err))
                 }
 
                 val bytes = response.body?.bytes()
@@ -251,9 +273,11 @@ i+fozqmCTkpHUig37W5sLesojw==
                 }
 
                 val savedFile = saveToPublicStorage(context, outName, bytes)
+                LogManager.i(context, "DOWNLOAD", "Saved converted file to: ${savedFile.absolutePath}")
                 Result.success(savedFile)
             }
         } catch (e: Exception) {
+            LogManager.e(context, "DOWNLOAD", "Download exception", e)
             Result.failure(e)
         }
     }

@@ -71,19 +71,13 @@ def process_audio_file(
         seg_audio = seg['audio_data']
         dur = len(seg_audio) / sr
         
-        if dur > 4.0:
-            chunk_len = int(2.0 * sr)
-            sub_embs = []
-            for sub_s in range(0, len(seg_audio) - int(0.5 * sr), chunk_len):
-                sub_e = min(sub_s + chunk_len, len(seg_audio))
-                e = extract_embedding(seg_audio[sub_s:sub_e], sr=sr)
-                if e is not None:
-                    sub_embs.append(e)
-            if len(sub_embs) > 0:
-                avg_e = np.mean(sub_embs, axis=0)
-                seg_emb = avg_e / np.linalg.norm(avg_e)
-            else:
-                seg_emb = extract_embedding(seg_audio, sr=sr)
+        # Fast embedding extraction on central 3.0s window if segment is long
+        if dur > 3.0:
+            center_sample = len(seg_audio) // 2
+            half_win = int(1.5 * sr)
+            s_start = max(0, center_sample - half_win)
+            s_end = min(len(seg_audio), center_sample + half_win)
+            seg_emb = extract_embedding(seg_audio[s_start:s_end], sr=sr)
         else:
             seg_emb = extract_embedding(seg_audio, sr=sr)
             
