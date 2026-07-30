@@ -165,13 +165,19 @@ def segment_audio_vad(audio_path, top_db=30, min_speech_duration_ms=300, max_chu
     Returns a list of dicts: [{'start_sec': float, 'end_sec': float, 'audio_data': np.ndarray, 'sr': int}]
     """
     try:
-        temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        import uuid
+        temp_wav = os.path.join(tempfile.gettempdir(), f"vad_{uuid.uuid4().hex}.wav")
         cmd = ["ffmpeg", "-y", "-i", audio_path, "-ac", "1", "-ar", "16000", temp_wav]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        y, sr = sf.read(temp_wav)
-        try: os.remove(temp_wav)
-        except Exception: pass
-    except Exception:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0 and os.path.exists(temp_wav):
+            y, sr = sf.read(temp_wav)
+            try: os.remove(temp_wav)
+            except Exception: pass
+        else:
+            print(f"[VAD] FFmpeg error: {res.stderr[:200]}", flush=True)
+            y, sr = librosa.load(audio_path, sr=16000, mono=True)
+    except Exception as e:
+        print(f"[VAD] Extraction exception: {e}", flush=True)
         y, sr = librosa.load(audio_path, sr=16000, mono=True)
 
     intervals = fast_vad_split(y, top_db=top_db, frame_length=2048, hop_length=512)
