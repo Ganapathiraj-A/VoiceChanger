@@ -7,8 +7,10 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -18,6 +20,9 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.security.KeyFactory
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
 import java.util.concurrent.TimeUnit
 
 data class JobStatusResponse(
@@ -30,7 +35,36 @@ data class JobStatusResponse(
 )
 
 object CloudApiClient {
-    private const val BASE_URL = "https://655ef1a6c5397f.lhr.life"
+    private const val DIRECT_CLOUD_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
+    private const val SA_EMAIL = "voice-changer-app-sa@antigravity-app-5c1ff.iam.gserviceaccount.com"
+    private const val PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC+CH9ak2wEZYc8
+stoARrEbis2Uu49R39IDJX2ATd9E5HzW/WnEfod/1p5PPyZko2mF20fGmf2u2WpW
+Znf/oCWcg9ULgne9v3QrdJ1nxOl/ww4rWc4Obb6vOBdJ/skvQhI0f90hGMkqlZ6p
+YnrDu3d/U4ekkTrGs/q+M7UVYw+AaiBVGtd32fkTguvluevMswhBIJJ7MaszlZqn
+afhAiwwSFqfsCRJ0WgVVpi93HC1F+FTtt8ZZZyNh00Sz+GQ7NkttKvhsF8eIkJzE
+zbOtji1JLlW/UoT2VWglsengyTgZBWlcIftpCHGnvl3xkbktZyM0dAyshCmxhCeA
+1oUuPCMBAgMBAAECggEAFHfv1763TMXuyh/tkUgL/Y521EVbi5MTGNmp6e75VH9T
+3whOoyaJy8A/LwP7S626SPu0gHTHuVSbupCw7iy+wFwGz4WPBjYf+ipGZg30pJlK
+5mp24mD5v//HqmWyH8/7DAKVu+HikR6qh04fMQP5PBKwMo6eCRcLs/73y0TvP4J/
+EQq2DAmdrLHenAPIcS6FTBGnU7V6kY2/TJVp7ecN1TkQoWEx0JXU0otAnqv/mLNW
+kPhxPcAHCUU8MGlR13KOgc4hlfG5Y8RET7orNg1c6O+robvU43ObO+nJs8TUwX7J
+b+Ig521vlRsozWu6HuhVMNfdWPNZ4Uww9XLljjHpDQKBgQD00K4c5NaGaWlRX9H+
+GymvqjyvjmK0DLyRlaOc5ZHVyi2td+IlUPHNoPUSrPVeqTn9Z9dcSeBxr6wYqSlL
+VDpp4yDbZo8tSblKpVpjy9CxLE/r0FNBmy1Q2KON36j19RmiNAjhagO4CEfYAddC
+lfYmyrEEX5wa9zILfr14Nv0zZwKBgQDGtxiWygEscVMJm/pDLFVusK1Kxurz2bL2
+MwEylMgeJ3S3M2yMres7IzDe7EqgvzwQyyTXEYwbADkt8NxJ8Sj/TN9OO0SqJfmp
+YOSJNb9DYdyLLLRjVQvHY4D5H62/kl3opFL0AXjiSx5BchWm6Sr9UDqOtUEGCWnt
+PQjy0JsdVwKBgQC5kdj44+lM12hSm2xkzhgqJMN9W1OsIR9qx1/O1SFXSbqYDBBq
+stGnScOa1WnkyCfB0s2nEgTEiCHOS6OWixEAJH9Kb5JGBOUkFPTQQrU9J1apbC8/
+wq1149EOAKRlU9WLYx/8Jc0N2ZEDxllyCpQcUXYe145PzmKr3fUmw5/oLwKBgQCI
+/AstV4+7jVuK0kWRLOyv44dydvHcrAQciEiZD8tsThK9f+uihvoTyEyWQBmp+mpz
+wTZiNCx7KIpCSznwlxiF9f4yNdU93fPfeXXRyIVS9BFOt8CagTQffU6Zbecems21
+5CFzJ9inVtVClFystSv3d+kGG5j5il/FNUAH8xoa/QKBgQDQRhjMK/Ap21khcarr
+cBUWDbBaR1qeeYUQbH6INrDZCIUhXDL1PvY5OVBbHqQfmE17C0Z/72gHky+DpgXv
+PbLGwMoIk9HT4J/mmQz3Dvy4tIpbDMfQooJVuoWLyiChRQKK4tGqQq5S0pFFK7E/
+i+fozqmCTkpHUig37W5sLesojw==
+-----END PRIVATE KEY-----"""
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -38,8 +72,93 @@ object CloudApiClient {
         .writeTimeout(300, TimeUnit.SECONDS)
         .build()
 
+    @Volatile
+    private var cachedIdToken: String? = null
+    @Volatile
+    private var tokenExpiryTimeSec: Long = 0
+
+    private fun getGcpIdToken(): String {
+        val nowSec = System.currentTimeMillis() / 1000
+        val token = cachedIdToken
+        if (token != null && nowSec < tokenExpiryTimeSec - 120) {
+            return token
+        }
+
+        synchronized(this) {
+            val curToken = cachedIdToken
+            if (curToken != null && nowSec < tokenExpiryTimeSec - 120) {
+                return curToken
+            }
+
+            val headerJson = JSONObject().apply {
+                put("alg", "RS256")
+                put("typ", "JWT")
+            }.toString()
+
+            val payloadJson = JSONObject().apply {
+                put("iss", SA_EMAIL)
+                put("sub", SA_EMAIL)
+                put("aud", "https://oauth2.googleapis.com/token")
+                put("target_audience", DIRECT_CLOUD_URL)
+                put("iat", nowSec)
+                put("exp", nowSec + 3600)
+            }.toString()
+
+            val encodedHeader = base64UrlEncode(headerJson.toByteArray(Charsets.UTF_8))
+            val encodedPayload = base64UrlEncode(payloadJson.toByteArray(Charsets.UTF_8))
+            val unsignedJwt = "$encodedHeader.$encodedPayload"
+
+            val signatureBytes = signSha256Rsa(unsignedJwt.toByteArray(Charsets.UTF_8), PRIVATE_KEY_PEM)
+            val encodedSignature = base64UrlEncode(signatureBytes)
+            val signedJwt = "$unsignedJwt.$encodedSignature"
+
+            val formBody = FormBody.Builder()
+                .add("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+                .add("assertion", signedJwt)
+                .build()
+
+            val tokenReq = Request.Builder()
+                .url("https://oauth2.googleapis.com/token")
+                .post(formBody)
+                .build()
+
+            client.newCall(tokenReq).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    throw Exception("Auth token request failed: HTTP ${resp.code}")
+                }
+                val respStr = resp.body?.string() ?: ""
+                val json = JSONObject(respStr)
+                val newIdToken = json.getString("id_token")
+                cachedIdToken = newIdToken
+                tokenExpiryTimeSec = nowSec + 3000
+                return newIdToken
+            }
+        }
+    }
+
+    private fun base64UrlEncode(data: ByteArray): String {
+        return Base64.encodeToString(data, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    }
+
+    private fun signSha256Rsa(data: ByteArray, pemKey: String): ByteArray {
+        val cleanPem = pemKey
+            .replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace("\\s".toRegex(), "")
+        val privateKeyBytes = Base64.decode(cleanPem, Base64.DEFAULT)
+        val spec = PKCS8EncodedKeySpec(privateKeyBytes)
+        val kf = KeyFactory.getInstance("RSA")
+        val privateKey = kf.generatePrivate(spec)
+
+        val signer = Signature.getInstance("SHA256withRSA")
+        signer.initSign(privateKey)
+        signer.update(data)
+        return signer.sign()
+    }
+
     suspend fun submitJob(context: Context, fileUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val idToken = getGcpIdToken()
             val fileName = getFileName(context, fileUri) ?: "input_audio.mp3"
             val inputStream: InputStream = context.contentResolver.openInputStream(fileUri)
                 ?: return@withContext Result.failure(Exception("Cannot open audio file stream"))
@@ -59,7 +178,8 @@ object CloudApiClient {
                 .build()
 
             val request = Request.Builder()
-                .url("$BASE_URL/jobs/submit")
+                .url("$DIRECT_CLOUD_URL/jobs/submit")
+                .header("Authorization", "Bearer $idToken")
                 .post(requestBody)
                 .build()
 
@@ -79,8 +199,10 @@ object CloudApiClient {
 
     suspend fun pollJobStatus(jobId: String): Result<JobStatusResponse> = withContext(Dispatchers.IO) {
         try {
+            val idToken = getGcpIdToken()
             val request = Request.Builder()
-                .url("$BASE_URL/jobs/$jobId")
+                .url("$DIRECT_CLOUD_URL/jobs/$jobId")
+                .header("Authorization", "Bearer $idToken")
                 .get()
                 .build()
 
@@ -107,8 +229,10 @@ object CloudApiClient {
 
     suspend fun downloadAndSaveResult(context: Context, jobId: String, originalFileName: String): Result<File> = withContext(Dispatchers.IO) {
         try {
+            val idToken = getGcpIdToken()
             val request = Request.Builder()
-                .url("$BASE_URL/jobs/$jobId/download")
+                .url("$DIRECT_CLOUD_URL/jobs/$jobId/download")
+                .header("Authorization", "Bearer $idToken")
                 .get()
                 .build()
 
@@ -150,7 +274,6 @@ object CloudApiClient {
             }
         }
 
-        // Also save to app's external files directory for guaranteed FileProvider sharing
         val appMusicDir = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "VoiceChanger")
         if (!appMusicDir.exists()) {
             appMusicDir.mkdirs()
