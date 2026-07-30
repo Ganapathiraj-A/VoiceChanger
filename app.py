@@ -87,6 +87,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 JOBS_DB[job_id]["updated_at"] = now
                 JOBS_DB[job_id]["elapsed_seconds"] = round(elapsed, 1)
                 JOBS_DB[job_id]["eta_seconds"] = eta
+                print(f"[JOB {job_id}] [{pct:.1f}%] Elapsed: {elapsed:.1f}s | ETA: {eta:.1f}s | Step: {step_msg}", flush=True)
 
     try:
         if is_comparison:
@@ -213,6 +214,7 @@ def get_job_status(job_id: str):
         "filename": job["filename"],
         "status": job["status"],
         "step": job["step"],
+        "status_msg": job["step"],
         "progress_percent": job["progress_percent"],
         "elapsed_seconds": job["elapsed_seconds"],
         "eta_seconds": job["eta_seconds"],

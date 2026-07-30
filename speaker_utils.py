@@ -1,7 +1,10 @@
 import os
+import tempfile
+import subprocess
 import torch
 import numpy as np
 import librosa
+import soundfile as sf
 from pydub import AudioSegment
 
 device = "cpu"
@@ -157,11 +160,14 @@ def segment_audio_vad(audio_path, top_db=30, min_speech_duration_ms=300, max_chu
     Returns a list of dicts: [{'start_sec': float, 'end_sec': float, 'audio_data': np.ndarray, 'sr': int}]
     """
     try:
-        audio_seg = AudioSegment.from_file(audio_path).set_frame_rate(16000).set_channels(1)
-        samples = np.array(audio_seg.get_array_of_samples(), dtype=np.float32) / 32768.0
-        y, sr = samples, 16000
+        temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        cmd = ["ffmpeg", "-y", "-i", audio_path, "-ac", "1", "-ar", "16000", temp_wav]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        y, sr = sf.read(temp_wav)
+        try: os.remove(temp_wav)
+        except Exception: pass
     except Exception:
-        y, sr = librosa.load(audio_path, sr=16000)
+        y, sr = librosa.load(audio_path, sr=16000, mono=True)
 
     intervals = fast_vad_split(y, top_db=top_db, frame_length=2048, hop_length=512)
     
