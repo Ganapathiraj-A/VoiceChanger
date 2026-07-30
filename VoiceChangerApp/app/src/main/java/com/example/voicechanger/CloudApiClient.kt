@@ -30,7 +30,7 @@ data class JobStatusResponse(
 )
 
 object CloudApiClient {
-    private const val BASE_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
+    private const val BASE_URL = "https://655ef1a6c5397f.lhr.life"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
