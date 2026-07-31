@@ -333,7 +333,7 @@ fun VoiceChangerScreen() {
             TopAppBar(
                 title = {
                     Text(
-                        "VoiceChanger Cloud AI",
+                        "Voice Changer Cloud AI",
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
