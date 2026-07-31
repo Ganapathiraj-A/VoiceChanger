@@ -214,3 +214,42 @@ def segment_audio_vad(audio_path, top_db=30, min_speech_duration_ms=300, max_chu
                     })
                 
     return segments, y, sr
+
+
+def suppress_background_noise(y, sr=16000, highpass_cutoff=80.0, lowpass_cutoff=7600.0):
+    """
+    Suppresses ambient background noise and isolates human speech frequencies:
+    1. Butterworth bandpass filter (80 Hz - 7600 Hz) to eliminate DC rumble, wind, and electrical hiss.
+    2. Spectral noise gating / reduction to attenuate stationary background noise.
+    """
+    if len(y) == 0:
+        return y
+        
+    try:
+        from scipy.signal import butter, sosfilt
+        # 1. Bandpass filter for human vocal frequency range (80 Hz to 7600 Hz)
+        sos = butter(4, [highpass_cutoff, lowpass_cutoff], btype='bandpass', fs=sr, output='sos')
+        filtered_y = sosfilt(sos, y)
+        
+        # 2. Spectral noise reduction (using noisereduce or spectral thresholding)
+        try:
+            import noisereduce as nr
+            reduced_y = nr.reduce_noise(y=filtered_y, sr=sr, stationary=True, prop_decrease=0.75)
+            return reduced_y.astype(np.float32)
+        except ImportError:
+            # Fallback STFT spectral gating
+            stft = librosa.stft(filtered_y, n_fft=1024, hop_length=256)
+            magnitude, phase = librosa.magphase(stft)
+            
+            # Estimate noise floor from lowest 10th percentile magnitude frames
+            noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True)
+            mask = magnitude > (noise_floor * 1.4)
+            clean_magnitude = magnitude * mask.astype(np.float32)
+            
+            clean_stft = clean_magnitude * phase
+            clean_y = librosa.istft(clean_stft, hop_length=256, length=len(y))
+            return clean_y.astype(np.float32)
+    except Exception as e:
+        print(f"[NoiseSuppression] Fallback due to: {e}")
+        return y.astype(np.float32)
+

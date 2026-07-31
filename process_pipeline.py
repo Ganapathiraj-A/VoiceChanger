@@ -11,7 +11,8 @@ from tqdm import tqdm
 from speaker_utils import (
     segment_audio_vad,
     extract_embedding,
-    cosine_similarity
+    cosine_similarity,
+    suppress_background_noise
 )
 from voice_converter import convert_gender_auto
 
@@ -27,9 +28,9 @@ def process_audio_file(
 ):
     """
     High-Performance Voice Conversion Pipeline:
-    1. Fast vectorized VAD sample segmentation
-    2. Fast sub-sampled speaker embedding classification
-    3. Aggressive contiguous block merging (6.0s gap) for fast Praat pitch conversion
+    1. Background Noise Suppression & Speech Isolation (80Hz-7.6kHz bandpass & spectral gating)
+    2. Fast vectorized VAD sample segmentation
+    3. Speaker embedding classification per segment
     4. Smooth 5ms edge crossfading & final MP3 output export
     """
     if target_embedding is None and os.path.exists("target_speaker_profile.npy"):
@@ -40,15 +41,18 @@ def process_audio_file(
             try: progress_callback(pct, msg)
             except Exception: pass
 
-    _report_progress(5.0, "Running fast Voice Activity Detection...")
+    _report_progress(5.0, "Running Voice Activity Detection & Noise Suppression...")
     print(f"\n==================================================")
     print(f"  PROCESSING FILE: {os.path.basename(input_file)}")
     print(f"==================================================")
     
     # Load VAD segments
-    print("[1/4] Running Voice Activity Detection...")
+    print("[1/4] Running Voice Activity Detection & Background Noise Filtering...")
     segments, full_y, sr = segment_audio_vad(input_file)
     print(f"   -> Found {len(segments)} speech segments.")
+    
+    # Apply background noise suppression to isolate human voices
+    full_y = suppress_background_noise(full_y, sr=sr)
     
     if len(segments) == 0:
         print("[!] No speech segments detected. Exporting original audio.")
