@@ -35,7 +35,7 @@ data class JobStatusResponse(
 )
 
 object CloudApiClient {
-    private const val DIRECT_CLOUD_URL = "https://nationally-walnut-distributions-offline.trycloudflare.com"
+    private const val DIRECT_CLOUD_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
     private const val SA_EMAIL = "voice-changer-app-sa@antigravity-app-5c1ff.iam.gserviceaccount.com"
     private const val PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
 MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC+CH9ak2wEZYc8
@@ -235,7 +235,7 @@ i+fozqmCTkpHUig37W5sLesojw==
                 val eta = json.optDouble("eta_seconds", 30.0).toFloat()
                 val elapsed = json.optDouble("elapsed_seconds", 0.0).toFloat()
                 val msg = json.optString("status_msg", "Processing audio...")
-                val filename = json.optString("filename", null)
+                val filename = if (json.has("filename") && !json.isNull("filename")) json.getString("filename") else null
 
                 LogManager.d(context, "POLL", "Status=$status, Pct=${pct}%, ETA=${eta}s, Msg=$msg")
                 Result.success(JobStatusResponse(status, pct, eta, elapsed, msg, filename))
