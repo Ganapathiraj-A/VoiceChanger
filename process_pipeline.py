@@ -68,38 +68,26 @@ def process_audio_file(
     if len(valid_segments) == 0:
         valid_segments = segments
 
-    # Sub-sample up to 8 segments max for instant classification
+    # Evaluate every segment for precise speaker identification
     tot_segs = len(valid_segments)
-    if tot_segs > 8:
-        step_idx = max(1, tot_segs // 8)
-        eval_indices = set(range(0, tot_segs, step_idx))
-    else:
-        eval_indices = set(range(tot_segs))
-
     classified = []
+
     for i, seg in enumerate(valid_segments):
-        if i in eval_indices or i % 25 == 0 or i == tot_segs - 1:
-            _report_progress(15.0 + ((i + 1) / max(1, tot_segs)) * 20.0, f"Classifying speakers ({i+1}/{tot_segs})...")
+        _report_progress(15.0 + ((i + 1) / max(1, tot_segs)) * 20.0, f"Classifying speaker ({i+1}/{tot_segs})...")
         seg_audio = seg['audio_data']
         dur = len(seg_audio) / sr
         
-        if i in eval_indices:
-            if dur > 3.0:
-                center_sample = len(seg_audio) // 2
-                half_win = int(1.5 * sr)
-                s_start = max(0, center_sample - half_win)
-                s_end = min(len(seg_audio), center_sample + half_win)
-                seg_emb = extract_embedding(seg_audio[s_start:s_end], sr=sr)
-            else:
-                seg_emb = extract_embedding(seg_audio, sr=sr)
-                
-            sim = cosine_similarity(seg_emb, target_embedding)
-            is_target = (sim >= similarity_threshold)
-            last_is_target = is_target
-            last_sim = sim
+        if dur > 3.0:
+            center_sample = len(seg_audio) // 2
+            half_win = int(1.5 * sr)
+            s_start = max(0, center_sample - half_win)
+            s_end = min(len(seg_audio), center_sample + half_win)
+            seg_emb = extract_embedding(seg_audio[s_start:s_end], sr=sr)
         else:
-            is_target = last_is_target if 'last_is_target' in locals() else False
-            sim = last_sim if 'last_sim' in locals() else 0.0
+            seg_emb = extract_embedding(seg_audio, sr=sr)
+            
+        sim = cosine_similarity(seg_emb, target_embedding)
+        is_target = (sim >= similarity_threshold)
 
         classified.append({
             'start_sec': seg['start_sec'],
@@ -108,7 +96,7 @@ def process_audio_file(
             'sim': sim
         })
 
-    # Group non-target segments into continuous unbroken transform blocks (6.0s max gap)
+    # Group non-target segments into continuous unbroken transform blocks (0.2s max gap)
     merged_blocks = []
     curr_block = None
     preserved_count = 0
@@ -123,8 +111,8 @@ def process_audio_file(
             if curr_block is None:
                 curr_block = {'start_sec': seg['start_sec'], 'end_sec': seg['end_sec']}
             else:
-                # Merge if gap between non-target speech turns is <= 6.0 seconds for super fast Praat execution
-                if seg['start_sec'] - curr_block['end_sec'] <= 6.0:
+                # Merge only tight adjacent non-target segments (gap <= 0.2s) to protect target speech turns
+                if seg['start_sec'] - curr_block['end_sec'] <= 0.2:
                     curr_block['end_sec'] = seg['end_sec']
                 else:
                     merged_blocks.append(curr_block)

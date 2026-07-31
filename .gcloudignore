@@ -11,6 +11,7 @@ output/
 test/
 Sample/
 debug_clips/
+VoiceChangerApp/
 *.mp4
 *.mp3
 *.wav
