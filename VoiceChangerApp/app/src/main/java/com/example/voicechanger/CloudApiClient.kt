@@ -37,7 +37,7 @@ data class JobStatusResponse(
 )
 
 object CloudApiClient {
-    private const val DIRECT_CLOUD_URL = "http://192.168.240.1:8089"
+    private const val DIRECT_CLOUD_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
     private const val SA_EMAIL = "voice-changer-app-sa@antigravity-app-5c1ff.iam.gserviceaccount.com"
     private const val PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
 MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC+CH9ak2wEZYc8
