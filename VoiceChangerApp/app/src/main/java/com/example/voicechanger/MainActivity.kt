@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -103,6 +104,88 @@ fun VoiceChangerScreen() {
 
     var convertedFile by remember { mutableStateOf<File?>(null) }
 
+    var activeMediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var currentlyPlayingKey by remember { mutableStateOf<String?>(null) }
+
+    fun createMediaPlayerFromUri(uri: Uri): MediaPlayer? {
+        val mp = MediaPlayer()
+        try {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            if (pfd != null) {
+                mp.setDataSource(pfd.fileDescriptor)
+                mp.prepare()
+                pfd.close()
+                return mp
+            }
+        } catch (e: Exception) {
+            LogManager.e(context, "PLAYER", "PFD prepare failed: ${e.message}")
+        }
+        try {
+            mp.reset()
+            mp.setDataSource(context, uri)
+            mp.prepare()
+            return mp
+        } catch (e: Exception) {
+            LogManager.e(context, "PLAYER", "Uri prepare failed: ${e.message}")
+        }
+        val path = uri.path
+        if (path != null) {
+            val subName = path.substringAfterLast('/').substringAfterLast(':')
+            val directFile = File("/sdcard/Download", subName)
+            if (directFile.exists()) {
+                try {
+                    mp.reset()
+                    mp.setDataSource(directFile.absolutePath)
+                    mp.prepare()
+                    return mp
+                } catch (e: Exception) {
+                    LogManager.e(context, "PLAYER", "Direct path prepare failed: ${e.message}")
+                }
+            }
+        }
+        try { mp.release() } catch (_: Exception) {}
+        return null
+    }
+
+    fun stopAudioPlayback() {
+        try {
+            activeMediaPlayer?.stop()
+            activeMediaPlayer?.release()
+        } catch (_: Exception) {}
+        activeMediaPlayer = null
+        currentlyPlayingKey = null
+    }
+
+    fun toggleAudioPlayback(key: String, createPlayer: () -> MediaPlayer?) {
+        if (currentlyPlayingKey == key && activeMediaPlayer?.isPlaying == true) {
+            stopAudioPlayback()
+        } else {
+            stopAudioPlayback()
+            try {
+                val mp = createPlayer()
+                if (mp != null) {
+                    activeMediaPlayer = mp
+                    currentlyPlayingKey = key
+                    mp.setOnCompletionListener {
+                        stopAudioPlayback()
+                    }
+                    mp.start()
+                } else {
+                    Toast.makeText(context, "Cannot play audio file", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                stopAudioPlayback()
+                Toast.makeText(context, "Error playing audio: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            stopAudioPlayback()
+        }
+    }
+
     var showLogs by remember { mutableStateOf(false) }
     var logText by remember { mutableStateOf("No logs") }
 
@@ -133,8 +216,10 @@ fun VoiceChangerScreen() {
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
+            stopAudioPlayback()
             selectedFileUri = uri
-            selectedFileName = uri.lastPathSegment ?: "Selected Audio File"
+            val rawName = uri.lastPathSegment ?: "Selected Audio File"
+            selectedFileName = rawName.substringAfterLast('/').substringAfterLast(':').ifEmpty { "Selected Audio File" }
             convertedFile = null
             errorMessage = null
             statusMessage = "File selected. Tap 'Convert Voice via Cloud'."
@@ -328,7 +413,7 @@ fun VoiceChangerScreen() {
                     )
 
                     Button(
-                        onClick = { filePickerLauncher.launch("audio/*") },
+                        onClick = { filePickerLauncher.launch("*/*") },
                         enabled = !isProcessing,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
@@ -337,12 +422,39 @@ fun VoiceChangerScreen() {
                     }
 
                     if (selectedFileUri != null) {
-                        Text(
-                            "Selected: ${selectedFileName ?: "Audio file"}",
-                            fontSize = 14.sp,
-                            color = Color(0xFF1DB954),
-                            fontWeight = FontWeight.Medium
-                        )
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "Selected: ${selectedFileName ?: "Audio file"}",
+                                fontSize = 14.sp,
+                                color = Color(0xFF1DB954),
+                                fontWeight = FontWeight.Medium
+                            )
+
+                            val isInputPlaying = currentlyPlayingKey == "INPUT_${selectedFileUri}" && activeMediaPlayer?.isPlaying == true
+                            Button(
+                                onClick = {
+                                    toggleAudioPlayback("INPUT_${selectedFileUri}") {
+                                        createMediaPlayerFromUri(selectedFileUri!!)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isInputPlaying) Color(0xFFE53935) else Color(0xFF1976D2)
+                                )
+                            ) {
+                                Text(
+                                    if (isInputPlaying) "⏸ Pause Input Audio" else "▶ Play Input Audio",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -510,20 +622,51 @@ fun VoiceChangerScreen() {
                                             color = Color.Gray
                                         )
                                     }
-                                    Button(
-                                        onClick = { shareFileToWhatsApp(file) },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(40.dp),
-                                        shape = RoundedCornerShape(6.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Text(
-                                            "💬 Share to WhatsApp",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.Black
-                                        )
+                                        val isPlayingFile = currentlyPlayingKey == "FILE_${file.absolutePath}" && activeMediaPlayer?.isPlaying == true
+                                        Button(
+                                            onClick = {
+                                                toggleAudioPlayback("FILE_${file.absolutePath}") {
+                                                    MediaPlayer().apply {
+                                                        setDataSource(file.absolutePath)
+                                                        prepare()
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(40.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isPlayingFile) Color(0xFFE53935) else Color(0xFF1DB954)
+                                            )
+                                        ) {
+                                            Text(
+                                                if (isPlayingFile) "⏸ Pause" else "▶ Play Audio",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.Black
+                                            )
+                                        }
+
+                                        Button(
+                                            onClick = { shareFileToWhatsApp(file) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(40.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                                        ) {
+                                            Text(
+                                                "💬 Share",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.Black
+                                            )
+                                        }
                                     }
                                 }
                             }

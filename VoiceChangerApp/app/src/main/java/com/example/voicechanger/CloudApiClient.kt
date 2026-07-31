@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -18,6 +19,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.KeyFactory
@@ -35,7 +37,7 @@ data class JobStatusResponse(
 )
 
 object CloudApiClient {
-    private const val DIRECT_CLOUD_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
+    private const val DIRECT_CLOUD_URL = "http://192.168.240.1:8089"
     private const val SA_EMAIL = "voice-changer-app-sa@antigravity-app-5c1ff.iam.gserviceaccount.com"
     private const val PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
 MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC+CH9ak2wEZYc8
@@ -161,21 +163,59 @@ i+fozqmCTkpHUig37W5sLesojw==
         return signer.sign()
     }
 
+    private fun readBytesFromUri(context: Context, fileUri: Uri): ByteArray {
+        // Try 1: ContentResolver openInputStream
+        try {
+            val stream = context.contentResolver.openInputStream(fileUri)
+            if (stream != null) {
+                return stream.use { it.readBytes() }
+            }
+        } catch (_: Exception) {}
+
+        // Try 2: ParcelFileDescriptor
+        try {
+            val pfd = context.contentResolver.openFileDescriptor(fileUri, "r")
+            if (pfd != null) {
+                return FileInputStream(pfd.fileDescriptor).use { it.readBytes() }
+            }
+        } catch (_: Exception) {}
+
+        // Try 3: Direct File path resolution (e.g. primary:Download/...)
+        val path = fileUri.path
+        if (!path.isNullOrEmpty()) {
+            val directFile = File(path)
+            if (directFile.exists() && directFile.canRead()) {
+                return directFile.readBytes()
+            }
+
+            val decodedPath = Uri.decode(path)
+            if (decodedPath.contains("primary:")) {
+                val relPath = decodedPath.substringAfter("primary:")
+                val sdcardFile = File(Environment.getExternalStorageDirectory(), relPath)
+                if (sdcardFile.exists() && sdcardFile.canRead()) {
+                    return sdcardFile.readBytes()
+                }
+            }
+        }
+
+        throw Exception("Unable to open audio file stream for URI: $fileUri")
+    }
+
     suspend fun submitJob(context: Context, fileUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
             val idToken = getGcpIdToken(context)
             val fileName = getFileName(context, fileUri) ?: "input_audio.mp3"
-            LogManager.i(context, "JOB", "Submitting file: $fileName")
+            LogManager.i(context, "JOB", "Submitting file: $fileName (URI: $fileUri)")
 
-            val inputStream: InputStream? = context.contentResolver.openInputStream(fileUri)
-            if (inputStream == null) {
-                LogManager.e(context, "JOB", "Cannot open input stream for $fileUri")
-                return@withContext Result.failure<String>(Exception("Cannot open audio file stream"))
+            val bytes: ByteArray = try {
+                readBytesFromUri(context, fileUri)
+            } catch (e: Exception) {
+                val readErr = "Failed to read file: ${e.message ?: e.javaClass.simpleName}"
+                LogManager.e(context, "JOB", readErr, e)
+                return@withContext Result.failure(Exception(readErr, e))
             }
 
-            val bytes = inputStream.readBytes()
-            inputStream.close()
-            LogManager.i(context, "JOB", "File size read: ${bytes.size} bytes")
+            LogManager.i(context, "JOB", "File size read successfully: ${bytes.size} bytes")
 
             val mediaType = (context.contentResolver.getType(fileUri) ?: "audio/mpeg").toMediaTypeOrNull()
 
@@ -196,7 +236,7 @@ i+fozqmCTkpHUig37W5sLesojw==
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    val err = "Job submit failed HTTP ${response.code}"
+                    val err = "Job submit failed HTTP ${response.code}: ${response.body?.string()}"
                     LogManager.e(context, "JOB", err)
                     return@withContext Result.failure(Exception(err))
                 }
@@ -207,8 +247,9 @@ i+fozqmCTkpHUig37W5sLesojw==
                 Result.success(jobId)
             }
         } catch (e: Exception) {
-            LogManager.e(context, "JOB", "Submit exception", e)
-            Result.failure(e)
+            val msg = e.message ?: e.javaClass.simpleName
+            LogManager.e(context, "JOB", "Submit exception: $msg", e)
+            Result.failure(Exception(msg, e))
         }
     }
 
@@ -266,10 +307,11 @@ i+fozqmCTkpHUig37W5sLesojw==
                 val bytes = response.body?.bytes()
                     ?: return@withContext Result.failure(Exception("Empty download body"))
 
-                val outName = if (originalFileName.endsWith(".mp3", ignoreCase = true)) {
-                    "converted_${originalFileName}"
+                val cleanName = originalFileName.substringAfterLast('/').substringAfterLast(':').ifEmpty { "audio_input.mp3" }
+                val outName = if (cleanName.endsWith(".mp3", ignoreCase = true)) {
+                    "converted_${cleanName}"
                 } else {
-                    "converted_${originalFileName.substringBeforeLast(".")}.mp3"
+                    "converted_${cleanName.substringBeforeLast(".")}.mp3"
                 }
 
                 val savedFile = saveToPublicStorage(context, outName, bytes)
