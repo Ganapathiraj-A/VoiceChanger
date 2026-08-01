@@ -218,13 +218,20 @@ def process_audio_file(
                 else:
                     out_audio[start_sample : start_sample + len(trans_y)] = trans_y
                     
-        print("[4/4] Exporting final converted audio track...")
-        _report_progress(95.0, "Exporting final converted MP3 audio...")
+        print("[4/4] Normalizing volume & exporting final converted audio track...")
+        _report_progress(95.0, "Normalizing volume & exporting final MP3 audio...")
+        
+        # Peak sample normalization
+        max_peak = float(np.max(np.abs(out_audio)))
+        if max_peak > 0:
+            out_audio = (out_audio / max_peak) * 0.96
+
         temp_full_wav = os.path.join(temp_dir, "final_output.wav")
         sf.write(temp_full_wav, out_audio, sr)
         
-        # Export to mp3
+        # Apply AudioSegment loudness boost (+3.0 dB with 0.5dB headroom)
         audio = AudioSegment.from_wav(temp_full_wav)
+        audio = audio.normalize(headroom=0.5) + 3.0
         audio.export(output_file, format="mp3", bitrate="192k")
         _report_progress(100.0, "Completed")
         print(f"[✓] Successfully generated output: {output_file}")
