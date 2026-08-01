@@ -496,6 +496,7 @@ fun VoiceChangerScreen() {
 
             // Collapsible Advanced Options Section (Speaker Diarization & Engine Selection)
             Card(
+                onClick = { showAdvancedOptions = !showAdvancedOptions },
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
                 shape = RoundedCornerShape(12.dp)
@@ -511,16 +512,20 @@ fun VoiceChangerScreen() {
                     ) {
                         Text(
                             "⚙️ Advanced Options (Speaker & Engine)",
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
                         )
-                        Button(
-                            onClick = { showAdvancedOptions = !showAdvancedOptions },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
-                            shape = RoundedCornerShape(8.dp)
+                        IconButton(
+                            onClick = { showAdvancedOptions = !showAdvancedOptions }
                         ) {
-                            Text(if (showAdvancedOptions) "▲ Hide Options" else "▼ Show Options", color = Color.White, fontSize = 12.sp)
+                            Text(
+                                if (showAdvancedOptions) "▲" else "▼",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1DB954)
+                            )
                         }
                     }
 
