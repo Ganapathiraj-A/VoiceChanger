@@ -66,8 +66,14 @@ def health_check():
 # ASYNC JOB MANAGEMENT ENDPOINTS (PROGRESS & ETA)
 # ---------------------------------------------------------
 
-def run_job_background(job_id: str, input_path: str, output_path: str, threshold: float, target_gender: str, is_comparison: bool):
-    target_embedding = np.load(PROFILE_PATH)
+def run_job_background(job_id: str, input_path: str, output_path: str, threshold: float, target_gender: str, target_profile_name: str, is_comparison: bool):
+    target_embedding = None
+    if target_profile_name:
+        prof_path = os.path.join("target_profiles", f"{target_profile_name}.npy")
+        if os.path.exists(prof_path):
+            target_embedding = np.load(prof_path)
+    if target_embedding is None and os.path.exists(PROFILE_PATH):
+        target_embedding = np.load(PROFILE_PATH)
     
     def on_progress(pct: float, step_msg: str):
         with JOBS_LOCK:
@@ -96,6 +102,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 input_file=input_path,
                 output_file=output_path,
                 target_embedding=target_embedding,
+                target_profile_name=target_profile_name,
                 similarity_threshold=threshold,
                 target_gender=target_gender,
                 progress_callback=on_progress
@@ -107,6 +114,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 input_file=input_path,
                 output_file=output_path,
                 target_embedding=target_embedding,
+                target_profile_name=target_profile_name,
                 similarity_threshold=threshold,
                 target_gender=target_gender,
                 progress_callback=on_progress
@@ -132,21 +140,33 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 JOBS_DB[job_id]["error"] = str(e)
                 JOBS_DB[job_id]["step"] = f"Error: {str(e)}"
 
+@app.get("/profiles")
+def list_target_profiles():
+    target_dir = "target_profiles"
+    profiles = []
+    if os.path.exists(target_dir):
+        for f in sorted(os.listdir(target_dir)):
+            if f.endswith(".npy"):
+                profiles.append(f.replace(".npy", ""))
+    return {
+        "status": "success",
+        "available_profiles": profiles,
+        "count": len(profiles)
+    }
+
 @app.post("/jobs/submit")
 async def submit_job(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     threshold: float = Form(0.84),
     target_gender: str = Form("auto"),
+    target_profile_name: str = Form(None),
     is_comparison: bool = Form(False)
 ):
     """
     Submits an audio conversion job for background processing.
     Returns immediately with a job_id and status_url to poll progress & ETA.
     """
-    if not os.path.exists(PROFILE_PATH):
-        raise HTTPException(status_code=400, detail="Target speaker profile not found.")
-
     job_id = f"job_{uuid.uuid4().hex[:10]}"
     ext = os.path.splitext(file.filename)[1] or ".mp4"
     
@@ -178,7 +198,7 @@ async def submit_job(
     # Launch processing in dedicated background thread so main Uvicorn event loop stays 100% responsive
     worker_thread = threading.Thread(
         target=run_job_background,
-        args=(job_id, temp_in_path, temp_out_path, threshold, target_gender, is_comparison),
+        args=(job_id, temp_in_path, temp_out_path, threshold, target_gender, target_profile_name, is_comparison),
         daemon=True
     )
     worker_thread.start()

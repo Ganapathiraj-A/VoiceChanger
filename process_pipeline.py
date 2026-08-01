@@ -22,6 +22,7 @@ def process_audio_file(
     input_file: str,
     output_file: str,
     target_embedding: np.ndarray = None,
+    target_profile_name: str = None,
     similarity_threshold: float = 0.50,
     target_gender: str = "female",
     progress_callback = None
@@ -30,11 +31,17 @@ def process_audio_file(
     High-Performance Voice Conversion Pipeline:
     1. Background Noise Suppression & Speech Isolation (80Hz-7.6kHz bandpass & spectral gating)
     2. Fast vectorized VAD sample segmentation
-    3. Speaker embedding classification per segment
+    3. Speaker embedding classification per segment against target speaker profile
     4. Smooth 5ms edge crossfading & final MP3 output export
     """
-    if target_embedding is None and os.path.exists("target_speaker_profile.npy"):
-        target_embedding = np.load("target_speaker_profile.npy")
+    if target_embedding is None:
+        if target_profile_name:
+            prof_path = os.path.join("target_profiles", f"{target_profile_name}.npy")
+            if os.path.exists(prof_path):
+                target_embedding = np.load(prof_path)
+                print(f"[Pipeline] Loaded target profile: {prof_path}")
+        if target_embedding is None and os.path.exists("target_speaker_profile.npy"):
+            target_embedding = np.load("target_speaker_profile.npy")
         
     def _report_progress(pct, msg):
         if progress_callback:
