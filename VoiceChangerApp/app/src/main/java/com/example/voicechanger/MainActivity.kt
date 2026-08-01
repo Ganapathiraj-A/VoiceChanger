@@ -309,6 +309,66 @@ fun VoiceChangerScreen() {
         }
     }
 
+    var isAnalyzingPreview by remember { mutableStateOf(false) }
+    var previewData by remember { mutableStateOf<DiarizePreviewResponse?>(null) }
+    var selectedPreserveCluster by remember { mutableStateOf(0) }
+    var conversionMode by remember { mutableStateOf("rvc") }
+    var selectedTargetProfile by remember { mutableStateOf("tamil_female") }
+    var showAdvancedOptions by remember { mutableStateOf(false) }
+
+    var previewProgressPercent by remember { mutableStateOf(0f) }
+    var previewEtaSeconds by remember { mutableStateOf(3f) }
+    var previewElapsedSeconds by remember { mutableStateOf(0f) }
+    var previewStepMessage by remember { mutableStateOf("Analyzing speakers...") }
+
+    fun triggerSpeakerPreview(u: Uri) {
+        coroutineScope.launch {
+            isAnalyzingPreview = true
+            errorMessage = null
+            previewProgressPercent = 0f
+            previewEtaSeconds = 3f
+            previewElapsedSeconds = 0f
+            previewStepMessage = "Uploading & initializing speaker analysis..."
+            statusMessage = "Analyzing audio speakers..."
+
+            val submitRes = CloudApiClient.submitDiarizePreviewJob(context, u)
+            submitRes.onSuccess { prevId ->
+                var isFinished = false
+                while (!isFinished && isAnalyzingPreview) {
+                    delay(500)
+                    val pollRes = CloudApiClient.pollPreviewStatus(context, prevId)
+                    pollRes.onSuccess { st ->
+                        previewProgressPercent = st.progressPercent
+                        previewEtaSeconds = st.etaSeconds
+                        previewElapsedSeconds = st.elapsedSeconds
+                        previewStepMessage = st.stepMsg
+
+                        if (st.status == "completed" && st.previewResponse != null) {
+                            isFinished = true
+                            isAnalyzingPreview = false
+                            val resp = st.previewResponse
+                            previewData = resp
+                            if (resp != null) {
+                                selectedPreserveCluster = if (resp.speakerAPct <= resp.speakerBPct) 0 else 1
+                            }
+                            statusMessage = "Speakers analyzed! Auto-selected speaker with less speech duration (${if (selectedPreserveCluster == 0) "Speaker A" else "Speaker B"}). Ready to convert!"
+                        } else if (st.status == "failed") {
+                            isFinished = true
+                            isAnalyzingPreview = false
+                            statusMessage = "File selected. Ready to convert."
+                            errorMessage = "Speaker analysis failed: ${st.stepMsg}"
+                        }
+                    }
+                }
+            }.onFailure { err ->
+                isAnalyzingPreview = false
+                statusMessage = "File selected. Ready to convert."
+                errorMessage = "Speaker analysis error: ${err.message ?: err.javaClass.simpleName}"
+            }
+            refreshLogs()
+        }
+    }
+
     var isAutoCloseActive by remember { mutableStateOf(false) }
     var autoCloseRemainingSec by remember { mutableStateOf(0) }
 
@@ -322,6 +382,10 @@ fun VoiceChangerScreen() {
         refreshHistory()
         refreshLogs()
         scanAndSelectLatestCallRecording()
+
+        selectedFileUri?.let { uri ->
+            triggerSpeakerPreview(uri)
+        }
 
         val isPostCall = (context as? ComponentActivity)?.intent?.getBooleanExtra("AUTO_SELECT_LATEST_CALL", false) == true
         if (isPostCall) {
@@ -340,18 +404,6 @@ fun VoiceChangerScreen() {
         LogManager.i(context, "APP", "VoiceChanger App Launched.")
     }
 
-    var isAnalyzingPreview by remember { mutableStateOf(false) }
-    var previewData by remember { mutableStateOf<DiarizePreviewResponse?>(null) }
-    var selectedPreserveCluster by remember { mutableStateOf(0) }
-    var conversionMode by remember { mutableStateOf("rvc") }
-    var selectedTargetProfile by remember { mutableStateOf("tamil_female") }
-    var showAdvancedOptions by remember { mutableStateOf(false) }
-
-    var previewProgressPercent by remember { mutableStateOf(0f) }
-    var previewEtaSeconds by remember { mutableStateOf(3f) }
-    var previewElapsedSeconds by remember { mutableStateOf(0f) }
-    var previewStepMessage by remember { mutableStateOf("Analyzing speakers...") }
-
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -367,54 +419,6 @@ fun VoiceChangerScreen() {
             statusMessage = "File selected. Analyzing speakers..."
             LogManager.i(context, "UI", "Selected file: $selectedFileName ($uri)")
             refreshLogs()
-
-            fun triggerSpeakerPreview(u: Uri) {
-                coroutineScope.launch {
-                    isAnalyzingPreview = true
-                    errorMessage = null
-                    previewProgressPercent = 0f
-                    previewEtaSeconds = 3f
-                    previewElapsedSeconds = 0f
-                    previewStepMessage = "Uploading & initializing speaker analysis..."
-                    statusMessage = "Analyzing speakers..."
-
-                    val submitRes = CloudApiClient.submitDiarizePreviewJob(context, u)
-                    submitRes.onSuccess { prevId ->
-                        var isFinished = false
-                        while (!isFinished && isAnalyzingPreview) {
-                            delay(500)
-                            val pollRes = CloudApiClient.pollPreviewStatus(context, prevId)
-                            pollRes.onSuccess { st ->
-                                previewProgressPercent = st.progressPercent
-                                previewEtaSeconds = st.etaSeconds
-                                previewElapsedSeconds = st.elapsedSeconds
-                                previewStepMessage = st.stepMsg
-
-                                if (st.status == "completed" && st.previewResponse != null) {
-                                    isFinished = true
-                                    isAnalyzingPreview = false
-                                    val resp = st.previewResponse
-                                    previewData = resp
-                                    if (resp != null) {
-                                        selectedPreserveCluster = if (resp.speakerAPct <= resp.speakerBPct) 0 else 1
-                                    }
-                                    statusMessage = "Speakers analyzed! Auto-selected speaker with less speech time (${if (selectedPreserveCluster == 0) "Speaker A" else "Speaker B"})."
-                                } else if (st.status == "failed") {
-                                    isFinished = true
-                                    isAnalyzingPreview = false
-                                    statusMessage = "File selected. You can convert or retry speaker analysis."
-                                    errorMessage = "Speaker analysis failed: ${st.stepMsg}"
-                                }
-                            }
-                        }
-                    }.onFailure { err ->
-                        isAnalyzingPreview = false
-                        statusMessage = "File selected. You can convert or retry speaker analysis."
-                        errorMessage = "Speaker analysis error: ${err.message ?: err.javaClass.simpleName}"
-                    }
-                    refreshLogs()
-                }
-            }
 
             triggerSpeakerPreview(uri)
         }
@@ -459,6 +463,7 @@ fun VoiceChangerScreen() {
 
     fun startCloudProcessing() {
         val uri = selectedFileUri ?: return
+        cancelAutoClose()
         isProcessing = true
         progressPercent = 0f
         etaSeconds = 30f
@@ -469,12 +474,22 @@ fun VoiceChangerScreen() {
         refreshLogs()
 
         coroutineScope.launch {
+            if (isAnalyzingPreview || previewData == null) {
+                statusMessage = "Analyzing audio speakers first to choose default target speaker..."
+                var waitRetries = 0
+                while ((isAnalyzingPreview || previewData == null) && waitRetries < 30) {
+                    delay(500)
+                    waitRetries++
+                }
+            }
+
+            statusMessage = "Submitting file to Cloud Engine..."
             val submitResult = CloudApiClient.submitJob(
                 context,
                 uri,
                 preserveSpeakerCluster = selectedPreserveCluster,
                 conversionMode = conversionMode,
-                targetProfileName = if (conversionMode == "target_morph") selectedTargetProfile else null
+                targetProfileName = selectedTargetProfile
             )
             refreshLogs()
             submitResult.onSuccess { jobId ->
