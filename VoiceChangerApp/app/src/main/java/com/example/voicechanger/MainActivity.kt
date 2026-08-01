@@ -217,6 +217,7 @@ fun VoiceChangerScreen() {
     var selectedPreserveCluster by remember { mutableStateOf(0) }
     var conversionMode by remember { mutableStateOf("rvc") }
     var selectedTargetProfile by remember { mutableStateOf("tamil_female") }
+    var showAdvancedOptions by remember { mutableStateOf(false) }
 
     var previewProgressPercent by remember { mutableStateOf(0f) }
     var previewEtaSeconds by remember { mutableStateOf(3f) }
@@ -263,9 +264,12 @@ fun VoiceChangerScreen() {
                                 if (st.status == "completed" && st.previewResponse != null) {
                                     isFinished = true
                                     isAnalyzingPreview = false
-                                    previewData = st.previewResponse
-                                    selectedPreserveCluster = 0
-                                    statusMessage = "Speakers analyzed! Play sample audio for Speaker A & Speaker B below to choose which voice to preserve."
+                                    val resp = st.previewResponse
+                                    previewData = resp
+                                    if (resp != null) {
+                                        selectedPreserveCluster = if (resp.speakerAPct <= resp.speakerBPct) 0 else 1
+                                    }
+                                    statusMessage = "Speakers analyzed! Auto-selected speaker with less speech time (${if (selectedPreserveCluster == 0) "Speaker A" else "Speaker B"})."
                                 } else if (st.status == "failed") {
                                     isFinished = true
                                     isAnalyzingPreview = false
@@ -487,12 +491,70 @@ fun VoiceChangerScreen() {
                                 )
                             }
 
+                            // Convert Voice via Cloud Button placed right below Choose Audio
+                            Button(
+                                onClick = { startCloudProcessing() },
+                                enabled = selectedFileUri != null && !isProcessing,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp)
+                                    .padding(top = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF1DB954),
+                                    disabledContainerColor = Color(0xFF2E4E38)
+                                )
+                            ) {
+                                Text(
+                                    if (isProcessing) "⚡ Processing on GCP Cloud..." else "⚡ Convert Voice via Cloud",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Collapsible Advanced Options Section (Speaker Diarization & Engine Selection)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "⚙️ Advanced Options (Speaker & Engine)",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Button(
+                            onClick = { showAdvancedOptions = !showAdvancedOptions },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(if (showAdvancedOptions) "▲ Hide Options" else "▼ Show Options", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+
+                    AnimatedVisibility(visible = showAdvancedOptions) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (isAnalyzingPreview) {
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 8.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                                        .padding(top = 4.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF252525)),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
                                     Column(
@@ -553,14 +615,14 @@ fun VoiceChangerScreen() {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 8.dp),
+                                        .padding(top = 4.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        "Choose Voice to PRESERVE (Touch ▶ to listen):",
-                                        fontSize = 14.sp,
+                                        "Voice to PRESERVE (Auto-selected speaker with less talk time):",
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = Color(0xFFFFA726)
                                     )
 
                                     val prev = previewData!!
@@ -588,7 +650,7 @@ fun VoiceChangerScreen() {
                                                     colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
                                                 )
                                                 Column(modifier = Modifier.padding(start = 4.dp)) {
-                                                    Text("Speaker A", fontWeight = FontWeight.Bold, color = Color.White)
+                                                    Text("Speaker A ${if (prev.speakerAPct <= prev.speakerBPct) "(Less Speech Time)" else ""}", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
                                                     Text("${prev.speakerAPct}% speech time (${prev.speakerADurSec}s)", color = Color.LightGray, fontSize = 12.sp)
                                                 }
                                             }
@@ -630,7 +692,7 @@ fun VoiceChangerScreen() {
                                                     colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
                                                 )
                                                 Column(modifier = Modifier.padding(start = 4.dp)) {
-                                                    Text("Speaker B", fontWeight = FontWeight.Bold, color = Color.White)
+                                                    Text("Speaker B ${if (prev.speakerBPct < prev.speakerAPct) "(Less Speech Time)" else ""}", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
                                                     Text("${prev.speakerBPct}% speech time (${prev.speakerBDurSec}s)", color = Color.LightGray, fontSize = 12.sp)
                                                 }
                                             }
@@ -653,10 +715,8 @@ fun VoiceChangerScreen() {
 
                             // Conversion Engine Mode Selection Card
                             Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF252525)),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Column(
@@ -784,27 +844,6 @@ fun VoiceChangerScreen() {
                 }
             }
 
-            // Process Action Button
-            Button(
-                onClick = { startCloudProcessing() },
-                enabled = selectedFileUri != null && !isProcessing,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1DB954),
-                    disabledContainerColor = Color(0xFF2E4E38)
-                )
-            ) {
-                Text(
-                    if (isProcessing) "⚡ Processing on GCP Cloud..." else "⚡ Convert Voice via Cloud",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black
-                )
-            }
-
             // Progress & Status Card with Minutes & Seconds
             AnimatedVisibility(visible = isProcessing || progressPercent > 0f) {
                 Card(
@@ -903,7 +942,7 @@ fun VoiceChangerScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "🎧 Converted Files History (${historyFiles.size})",
+                            "🎧 Converted Files History (Past ${minOf(5, historyFiles.size)} of ${historyFiles.size})",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -920,7 +959,7 @@ fun VoiceChangerScreen() {
                             color = Color.Gray
                         )
                     } else {
-                        historyFiles.forEach { file ->
+                        historyFiles.take(5).forEach { file ->
                             val dateStr = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
