@@ -203,13 +203,14 @@ def suppress_background_noise(y, sr=16000, highpass_cutoff=80.0, lowpass_cutoff=
         return y
 
 
-def generate_speaker_previews(audio_path: str, output_dir: str):
+def generate_speaker_previews(audio_path: str, output_dir: str, progress_callback=None):
     """
     Diarizes an input audio recording into 2 speakers and extracts representative
     5-second audio preview clips for Speaker A (Cluster 0) and Speaker B (Cluster 1).
     Returns dict with stats and file paths for speaker_a and speaker_b sample clips.
     """
     os.makedirs(output_dir, exist_ok=True)
+    if progress_callback: progress_callback(10.0, "Extracting voice activity (VAD)...")
     segments, full_y, sr = segment_audio_vad(audio_path)
     valid_segs = [s for s in segments if len(s['audio_data'])/sr >= 0.3]
     
@@ -220,8 +221,18 @@ def generate_speaker_previews(audio_path: str, output_dir: str):
     durations = np.array([s['end_sec'] - s['start_sec'] for s in preview_segs])
     total_dur = np.sum(durations)
     
-    embeddings = np.array([extract_embedding(s['audio_data'][:int(2.0*sr)], sr=sr) for s in preview_segs])
+    if progress_callback: progress_callback(25.0, f"Extracting embeddings for {len(preview_segs)} segments...")
+    embeddings = []
+    for idx, s in enumerate(preview_segs):
+        emb = extract_embedding(s['audio_data'][:int(2.0*sr)], sr=sr)
+        embeddings.append(emb)
+        if progress_callback and len(preview_segs) > 0:
+            pct = 25.0 + ((idx + 1) / len(preview_segs)) * 55.0
+            progress_callback(pct, f"Analyzing voice features ({idx+1}/{len(preview_segs)})...")
+
+    embeddings = np.array(embeddings)
     
+    if progress_callback: progress_callback(85.0, "Clustering speakers (Speaker A vs Speaker B)...")
     from sklearn.cluster import KMeans
     n_clusters = min(2, len(preview_segs))
     if n_clusters >= 2:
@@ -242,6 +253,7 @@ def generate_speaker_previews(audio_path: str, output_dir: str):
     pct_0 = round((spk_durs[0] / total_dur) * 100.0, 1) if total_dur > 0 else 50.0
     pct_1 = round((spk_durs[1] / total_dur) * 100.0, 1) if total_dur > 0 else 50.0
 
+    if progress_callback: progress_callback(92.0, "Generating sample MP3 audio clips...")
     audio_a = np.concatenate(spk_audio[0]) if len(spk_audio[0]) > 0 else full_y[:int(5.0*sr)]
     audio_b = np.concatenate(spk_audio[1]) if len(spk_audio[1]) > 0 else full_y[:int(5.0*sr)]
 
@@ -260,6 +272,8 @@ def generate_speaker_previews(audio_path: str, output_dir: str):
     except Exception:
         sf.write(path_a, audio_a, sr)
         sf.write(path_b, audio_b, sr)
+
+    if progress_callback: progress_callback(100.0, "Speaker analysis completed!")
 
     return {
         "speaker_a_pct": pct_0,

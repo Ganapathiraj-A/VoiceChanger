@@ -156,13 +156,98 @@ def list_target_profiles():
         "count": len(profiles)
     }
 
-PREVIEW_DB = {}
+PREVIEW_JOBS = {}
+PREVIEW_LOCK = threading.Lock()
+
+def run_preview_background(preview_id: str, temp_in: str, preview_dir: str):
+    start_time = time.time()
+    def on_progress(pct: float, msg: str):
+        with PREVIEW_LOCK:
+            if preview_id in PREVIEW_JOBS:
+                elapsed = round(time.time() - start_time, 1)
+                eta = max(0.0, round((elapsed / (pct / 100.0)) - elapsed, 1)) if pct > 5.0 else 3.0
+                PREVIEW_JOBS[preview_id].update({
+                    "progress_percent": round(pct, 1),
+                    "step": msg,
+                    "elapsed_seconds": elapsed,
+                    "eta_seconds": eta
+                })
+    try:
+        from speaker_utils import generate_speaker_previews
+        stats = generate_speaker_previews(temp_in, preview_dir, progress_callback=on_progress)
+        with PREVIEW_LOCK:
+            PREVIEW_JOBS[preview_id].update({
+                "status": "completed",
+                "progress_percent": 100.0,
+                "step": "Completed!",
+                "eta_seconds": 0.0,
+                "stats": stats
+            })
+    except Exception as e:
+        with PREVIEW_LOCK:
+            PREVIEW_JOBS[preview_id].update({
+                "status": "failed",
+                "error": str(e),
+                "step": f"Error: {str(e)}"
+            })
+
+@app.post("/diarize/preview/submit")
+async def submit_diarize_preview(file: UploadFile = File(...)):
+    preview_id = f"prev_{uuid.uuid4().hex[:10]}"
+    ext = os.path.splitext(file.filename)[1] or ".mp4"
+    preview_dir = os.path.join(tempfile.gettempdir(), preview_id)
+    os.makedirs(preview_dir, exist_ok=True)
+    
+    temp_in = os.path.join(preview_dir, f"input{ext}")
+    with open(temp_in, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    now = time.time()
+    with PREVIEW_LOCK:
+        PREVIEW_JOBS[preview_id] = {
+            "status": "processing",
+            "preview_id": preview_id,
+            "dir": preview_dir,
+            "progress_percent": 0.0,
+            "elapsed_seconds": 0.0,
+            "eta_seconds": 3.0,
+            "step": "Initializing speaker analysis...",
+            "created_at": now
+        }
+        
+    t = threading.Thread(target=run_preview_background, args=(preview_id, temp_in, preview_dir), daemon=True)
+    t.start()
+    return {"status": "processing", "preview_id": preview_id, "status_url": f"/diarize/preview/status/{preview_id}"}
+
+@app.get("/diarize/preview/status/{preview_id}")
+def get_preview_status(preview_id: str):
+    with PREVIEW_LOCK:
+        if preview_id not in PREVIEW_JOBS:
+            raise HTTPException(status_code=404, detail="Preview job not found.")
+        info = dict(PREVIEW_JOBS[preview_id])
+
+    if info["status"] == "completed":
+        stats = info.get("stats", {})
+        info["speaker_a"] = {
+            "id": 0,
+            "label": "Speaker A",
+            "speech_percent": stats.get("speaker_a_pct", 50.0),
+            "duration_seconds": stats.get("speaker_a_dur_s", 0.0),
+            "sample_url": f"/diarize/preview/{preview_id}/speaker_a"
+        }
+        info["speaker_b"] = {
+            "id": 1,
+            "label": "Speaker B",
+            "speech_percent": stats.get("speaker_b_pct", 50.0),
+            "duration_seconds": stats.get("speaker_b_dur_s", 0.0),
+            "sample_url": f"/diarize/preview/{preview_id}/speaker_b"
+        }
+    return info
 
 @app.post("/diarize/preview")
 async def diarize_preview(file: UploadFile = File(...)):
     """
-    Splits uploaded audio into Speaker A and Speaker B, generates 5-second MP3 sample clips
-    for both speakers, and returns speech time % so user can choose which speaker to preserve.
+    Backward compatible synchronous preview endpoint.
     """
     preview_id = f"prev_{uuid.uuid4().hex[:10]}"
     ext = os.path.splitext(file.filename)[1] or ".mp4"
@@ -176,11 +261,6 @@ async def diarize_preview(file: UploadFile = File(...)):
     import asyncio
     from speaker_utils import generate_speaker_previews
     stats = await asyncio.to_thread(generate_speaker_previews, temp_in, preview_dir)
-    PREVIEW_DB[preview_id] = {
-        "dir": preview_dir,
-        "stats": stats
-    }
-    
     return {
         "status": "success",
         "preview_id": preview_id,

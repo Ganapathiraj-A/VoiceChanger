@@ -47,6 +47,15 @@ data class DiarizePreviewResponse(
     val speakerBUrl: String
 )
 
+data class PreviewStatusResponse(
+    val status: String,
+    val progressPercent: Float,
+    val etaSeconds: Float,
+    val elapsedSeconds: Float,
+    val stepMsg: String,
+    val previewResponse: DiarizePreviewResponse? = null
+)
+
 object CloudApiClient {
     private const val DIRECT_CLOUD_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
     private const val SA_EMAIL = "voice-changer-app-sa@antigravity-app-5c1ff.iam.gserviceaccount.com"
@@ -212,18 +221,12 @@ i+fozqmCTkpHUig37W5sLesojw==
         throw Exception("Unable to open audio file stream for URI: $fileUri")
     }
 
-    suspend fun fetchDiarizePreview(context: Context, fileUri: Uri): Result<DiarizePreviewResponse> = withContext(Dispatchers.IO) {
+    suspend fun submitDiarizePreviewJob(context: Context, fileUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
             val idToken = getGcpIdToken(context)
             val fileName = getFileName(context, fileUri) ?: "input_audio.mp4"
-            LogManager.i(context, "PREVIEW", "Requesting Diarization Preview for: $fileName")
 
-            val bytes: ByteArray = try {
-                readBytesFromUri(context, fileUri)
-            } catch (e: Exception) {
-                return@withContext Result.failure(Exception("Failed to read file for preview: ${e.message}"))
-            }
-
+            val bytes = readBytesFromUri(context, fileUri)
             val mediaType = (context.contentResolver.getType(fileUri) ?: "audio/mpeg").toMediaTypeOrNull()
 
             val requestBody = MultipartBody.Builder()
@@ -232,38 +235,63 @@ i+fozqmCTkpHUig37W5sLesojw==
                 .build()
 
             val request = Request.Builder()
-                .url("$DIRECT_CLOUD_URL/diarize/preview")
+                .url("$DIRECT_CLOUD_URL/diarize/preview/submit")
                 .header("Authorization", "Bearer $idToken")
                 .post(requestBody)
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    val err = "Preview failed HTTP ${response.code}: ${response.body?.string()}"
-                    LogManager.e(context, "PREVIEW", err)
-                    return@withContext Result.failure(Exception(err))
+                    return@withContext Result.failure(Exception("Preview submit failed HTTP ${response.code}"))
                 }
                 val bodyStr = response.body?.string() ?: ""
                 val json = JSONObject(bodyStr)
-                val prevId = json.getString("preview_id")
-                val spkA = json.getJSONObject("speaker_a")
-                val spkB = json.getJSONObject("speaker_b")
-
-                val resp = DiarizePreviewResponse(
-                    status = json.optString("status", "success"),
-                    previewId = prevId,
-                    speakerAPct = spkA.optDouble("speech_percent", 50.0).toFloat(),
-                    speakerADurSec = spkA.optDouble("duration_seconds", 0.0).toFloat(),
-                    speakerAUrl = "$DIRECT_CLOUD_URL${spkA.getString("sample_url")}",
-                    speakerBPct = spkB.optDouble("speech_percent", 50.0).toFloat(),
-                    speakerBDurSec = spkB.optDouble("duration_seconds", 0.0).toFloat(),
-                    speakerBUrl = "$DIRECT_CLOUD_URL${spkB.getString("sample_url")}"
-                )
-                LogManager.i(context, "PREVIEW", "Preview generated! Speaker A: ${resp.speakerAPct}%, Speaker B: ${resp.speakerBPct}%")
-                Result.success(resp)
+                Result.success(json.getString("preview_id"))
             }
         } catch (e: Exception) {
-            LogManager.e(context, "PREVIEW", "Preview exception: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun pollPreviewStatus(context: Context, previewId: String): Result<PreviewStatusResponse> = withContext(Dispatchers.IO) {
+        try {
+            val idToken = getGcpIdToken(context)
+            val request = Request.Builder()
+                .url("$DIRECT_CLOUD_URL/diarize/preview/status/$previewId")
+                .header("Authorization", "Bearer $idToken")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Poll preview failed HTTP ${response.code}"))
+                }
+                val bodyStr = response.body?.string() ?: ""
+                val json = JSONObject(bodyStr)
+                val status = json.optString("status", "processing")
+                val pct = json.optDouble("progress_percent", 0.0).toFloat()
+                val eta = json.optDouble("eta_seconds", 3.0).toFloat()
+                val elapsed = json.optDouble("elapsed_seconds", 0.0).toFloat()
+                val step = json.optString("step", "Analyzing speakers...")
+
+                var prevResp: DiarizePreviewResponse? = null
+                if (status == "completed" && json.has("speaker_a")) {
+                    val spkA = json.getJSONObject("speaker_a")
+                    val spkB = json.getJSONObject("speaker_b")
+                    prevResp = DiarizePreviewResponse(
+                        status = "success",
+                        previewId = previewId,
+                        speakerAPct = spkA.optDouble("speech_percent", 50.0).toFloat(),
+                        speakerADurSec = spkA.optDouble("duration_seconds", 0.0).toFloat(),
+                        speakerAUrl = "$DIRECT_CLOUD_URL${spkA.getString("sample_url")}",
+                        speakerBPct = spkB.optDouble("speech_percent", 50.0).toFloat(),
+                        speakerBDurSec = spkB.optDouble("duration_seconds", 0.0).toFloat(),
+                        speakerBUrl = "$DIRECT_CLOUD_URL${spkB.getString("sample_url")}"
+                    )
+                }
+                Result.success(PreviewStatusResponse(status, pct, eta, elapsed, step, prevResp))
+            }
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }

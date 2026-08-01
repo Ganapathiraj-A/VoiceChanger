@@ -216,6 +216,11 @@ fun VoiceChangerScreen() {
     var previewData by remember { mutableStateOf<DiarizePreviewResponse?>(null) }
     var selectedPreserveCluster by remember { mutableStateOf(0) }
 
+    var previewProgressPercent by remember { mutableStateOf(0f) }
+    var previewEtaSeconds by remember { mutableStateOf(3f) }
+    var previewElapsedSeconds by remember { mutableStateOf(0f) }
+    var previewStepMessage by remember { mutableStateOf("Analyzing speakers...") }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -235,14 +240,40 @@ fun VoiceChangerScreen() {
                 coroutineScope.launch {
                     isAnalyzingPreview = true
                     errorMessage = null
-                    statusMessage = "Analyzing speakers & generating audio previews..."
-                    val res = CloudApiClient.fetchDiarizePreview(context, u)
-                    isAnalyzingPreview = false
-                    res.onSuccess { data ->
-                        previewData = data
-                        selectedPreserveCluster = 0
-                        statusMessage = "Speakers analyzed! Play sample audio for Speaker A & Speaker B to choose which voice to preserve."
+                    previewProgressPercent = 0f
+                    previewEtaSeconds = 3f
+                    previewElapsedSeconds = 0f
+                    previewStepMessage = "Uploading & initializing speaker analysis..."
+                    statusMessage = "Analyzing speakers..."
+
+                    val submitRes = CloudApiClient.submitDiarizePreviewJob(context, u)
+                    submitRes.onSuccess { prevId ->
+                        var isFinished = false
+                        while (!isFinished && isAnalyzingPreview) {
+                            delay(500)
+                            val pollRes = CloudApiClient.pollPreviewStatus(context, prevId)
+                            pollRes.onSuccess { st ->
+                                previewProgressPercent = st.progressPercent
+                                previewEtaSeconds = st.etaSeconds
+                                previewElapsedSeconds = st.elapsedSeconds
+                                previewStepMessage = st.stepMsg
+
+                                if (st.status == "completed" && st.previewResponse != null) {
+                                    isFinished = true
+                                    isAnalyzingPreview = false
+                                    previewData = st.previewResponse
+                                    selectedPreserveCluster = 0
+                                    statusMessage = "Speakers analyzed! Play sample audio for Speaker A & Speaker B below to choose which voice to preserve."
+                                } else if (st.status == "failed") {
+                                    isFinished = true
+                                    isAnalyzingPreview = false
+                                    statusMessage = "File selected. You can convert or retry speaker analysis."
+                                    errorMessage = "Speaker analysis failed: ${st.stepMsg}"
+                                }
+                            }
+                        }
                     }.onFailure { err ->
+                        isAnalyzingPreview = false
                         statusMessage = "File selected. You can convert or retry speaker analysis."
                         errorMessage = "Speaker analysis error: ${err.message ?: err.javaClass.simpleName}"
                     }
@@ -437,20 +468,66 @@ fun VoiceChangerScreen() {
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
-                            }
+                                if (isAnalyzingPreview) {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    "🔍 Analyzing Speakers...",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = Color.White
+                                                )
+                                                Text(
+                                                    "${previewProgressPercent.toInt()}%",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = Color(0xFF1DB954)
+                                                )
+                                            }
 
-                            if (isAnalyzingPreview) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.padding(top = 8.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        color = Color(0xFF1DB954),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Text("Analyzing speakers & generating audio previews...", color = Color.Gray, fontSize = 13.sp)
+                                            LinearProgressIndicator(
+                                                progress = { (previewProgressPercent / 100f).coerceIn(0f, 1f) },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(8.dp),
+                                                color = Color(0xFF1DB954),
+                                                trackColor = Color(0xFF333333)
+                                            )
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    previewStepMessage,
+                                                    fontSize = 12.sp,
+                                                    color = Color.Gray,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text(
+                                                    "⏱ ${previewElapsedSeconds.toInt()}s (ETA: ${previewEtaSeconds.toInt()}s)",
+                                                    fontSize = 12.sp,
+                                                    color = Color(0xFFFFA726),
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
