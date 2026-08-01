@@ -66,7 +66,7 @@ def health_check():
 # ASYNC JOB MANAGEMENT ENDPOINTS (PROGRESS & ETA)
 # ---------------------------------------------------------
 
-def run_job_background(job_id: str, input_path: str, output_path: str, threshold: float, target_gender: str, target_profile_name: str, is_comparison: bool):
+def run_job_background(job_id: str, input_path: str, output_path: str, threshold: float, target_gender: str, target_profile_name: str, preserve_speaker_cluster: int, is_comparison: bool):
     target_embedding = None
     if target_profile_name:
         prof_path = os.path.join("target_profiles", f"{target_profile_name}.npy")
@@ -103,6 +103,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 output_file=output_path,
                 target_embedding=target_embedding,
                 target_profile_name=target_profile_name,
+                preserve_speaker_cluster=preserve_speaker_cluster,
                 similarity_threshold=threshold,
                 target_gender=target_gender,
                 progress_callback=on_progress
@@ -115,6 +116,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 output_file=output_path,
                 target_embedding=target_embedding,
                 target_profile_name=target_profile_name,
+                preserve_speaker_cluster=preserve_speaker_cluster,
                 similarity_threshold=threshold,
                 target_gender=target_gender,
                 progress_callback=on_progress
@@ -154,6 +156,58 @@ def list_target_profiles():
         "count": len(profiles)
     }
 
+PREVIEW_DB = {}
+
+@app.post("/diarize/preview")
+async def diarize_preview(file: UploadFile = File(...)):
+    """
+    Splits uploaded audio into Speaker A and Speaker B, generates 5-second MP3 sample clips
+    for both speakers, and returns speech time % so user can choose which speaker to preserve.
+    """
+    preview_id = f"prev_{uuid.uuid4().hex[:10]}"
+    ext = os.path.splitext(file.filename)[1] or ".mp4"
+    preview_dir = os.path.join(tempfile.gettempdir(), preview_id)
+    os.makedirs(preview_dir, exist_ok=True)
+    
+    temp_in = os.path.join(preview_dir, f"input{ext}")
+    with open(temp_in, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    from speaker_utils import generate_speaker_previews
+    stats = generate_speaker_previews(temp_in, preview_dir)
+    PREVIEW_DB[preview_id] = {
+        "dir": preview_dir,
+        "stats": stats
+    }
+    
+    return {
+        "status": "success",
+        "preview_id": preview_id,
+        "speaker_a": {
+            "id": 0,
+            "label": "Speaker A",
+            "speech_percent": stats["speaker_a_pct"],
+            "duration_seconds": stats["speaker_a_dur_s"],
+            "sample_url": f"/diarize/preview/{preview_id}/speaker_a"
+        },
+        "speaker_b": {
+            "id": 1,
+            "label": "Speaker B",
+            "speech_percent": stats["speaker_b_pct"],
+            "duration_seconds": stats["speaker_b_dur_s"],
+            "sample_url": f"/diarize/preview/{preview_id}/speaker_b"
+        }
+    }
+
+@app.get("/diarize/preview/{preview_id}/{speaker_id}")
+def stream_preview_sample(preview_id: str, speaker_id: str):
+    preview_dir = os.path.join(tempfile.gettempdir(), preview_id)
+    file_name = "speaker_a.mp3" if speaker_id.lower() in ["speaker_a", "0", "a"] else "speaker_b.mp3"
+    file_path = os.path.join(preview_dir, file_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Preview sample audio file not found.")
+    return FileResponse(file_path, media_type="audio/mpeg", filename=file_name)
+
 @app.post("/jobs/submit")
 async def submit_job(
     background_tasks: BackgroundTasks,
@@ -161,6 +215,7 @@ async def submit_job(
     threshold: float = Form(0.84),
     target_gender: str = Form("auto"),
     target_profile_name: str = Form(None),
+    preserve_speaker_cluster: int = Form(None),
     is_comparison: bool = Form(False)
 ):
     """
@@ -198,7 +253,7 @@ async def submit_job(
     # Launch processing in dedicated background thread so main Uvicorn event loop stays 100% responsive
     worker_thread = threading.Thread(
         target=run_job_background,
-        args=(job_id, temp_in_path, temp_out_path, threshold, target_gender, target_profile_name, is_comparison),
+        args=(job_id, temp_in_path, temp_out_path, threshold, target_gender, target_profile_name, preserve_speaker_cluster, is_comparison),
         daemon=True
     )
     worker_thread.start()

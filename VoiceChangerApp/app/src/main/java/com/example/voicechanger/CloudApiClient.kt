@@ -36,6 +36,17 @@ data class JobStatusResponse(
     val filename: String? = null
 )
 
+data class DiarizePreviewResponse(
+    val status: String,
+    val previewId: String,
+    val speakerAPct: Float,
+    val speakerADurSec: Float,
+    val speakerAUrl: String,
+    val speakerBPct: Float,
+    val speakerBDurSec: Float,
+    val speakerBUrl: String
+)
+
 object CloudApiClient {
     private const val DIRECT_CLOUD_URL = "https://voice-changer-service-ffboj7vvya-el.a.run.app"
     private const val SA_EMAIL = "voice-changer-app-sa@antigravity-app-5c1ff.iam.gserviceaccount.com"
@@ -201,11 +212,67 @@ i+fozqmCTkpHUig37W5sLesojw==
         throw Exception("Unable to open audio file stream for URI: $fileUri")
     }
 
-    suspend fun submitJob(context: Context, fileUri: Uri): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun fetchDiarizePreview(context: Context, fileUri: Uri): Result<DiarizePreviewResponse> = withContext(Dispatchers.IO) {
+        try {
+            val idToken = getGcpIdToken(context)
+            val fileName = getFileName(context, fileUri) ?: "input_audio.mp4"
+            LogManager.i(context, "PREVIEW", "Requesting Diarization Preview for: $fileName")
+
+            val bytes: ByteArray = try {
+                readBytesFromUri(context, fileUri)
+            } catch (e: Exception) {
+                return@withContext Result.failure(Exception("Failed to read file for preview: ${e.message}"))
+            }
+
+            val mediaType = (context.contentResolver.getType(fileUri) ?: "audio/mpeg").toMediaTypeOrNull()
+
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", fileName, bytes.toRequestBody(mediaType))
+                .build()
+
+            val request = Request.Builder()
+                .url("$DIRECT_CLOUD_URL/diarize/preview")
+                .header("Authorization", "Bearer $idToken")
+                .post(requestBody)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val err = "Preview failed HTTP ${response.code}: ${response.body?.string()}"
+                    LogManager.e(context, "PREVIEW", err)
+                    return@withContext Result.failure(Exception(err))
+                }
+                val bodyStr = response.body?.string() ?: ""
+                val json = JSONObject(bodyStr)
+                val prevId = json.getString("preview_id")
+                val spkA = json.getJSONObject("speaker_a")
+                val spkB = json.getJSONObject("speaker_b")
+
+                val resp = DiarizePreviewResponse(
+                    status = json.optString("status", "success"),
+                    previewId = prevId,
+                    speakerAPct = spkA.optDouble("speech_percent", 50.0).toFloat(),
+                    speakerADurSec = spkA.optDouble("duration_seconds", 0.0).toFloat(),
+                    speakerAUrl = "$DIRECT_CLOUD_URL${spkA.getString("sample_url")}",
+                    speakerBPct = spkB.optDouble("speech_percent", 50.0).toFloat(),
+                    speakerBDurSec = spkB.optDouble("duration_seconds", 0.0).toFloat(),
+                    speakerBUrl = "$DIRECT_CLOUD_URL${spkB.getString("sample_url")}"
+                )
+                LogManager.i(context, "PREVIEW", "Preview generated! Speaker A: ${resp.speakerAPct}%, Speaker B: ${resp.speakerBPct}%")
+                Result.success(resp)
+            }
+        } catch (e: Exception) {
+            LogManager.e(context, "PREVIEW", "Preview exception: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitJob(context: Context, fileUri: Uri, preserveSpeakerCluster: Int? = null): Result<String> = withContext(Dispatchers.IO) {
         try {
             val idToken = getGcpIdToken(context)
             val fileName = getFileName(context, fileUri) ?: "input_audio.mp3"
-            LogManager.i(context, "JOB", "Submitting file: $fileName (URI: $fileUri)")
+            LogManager.i(context, "JOB", "Submitting file: $fileName (URI: $fileUri, preserve_cluster: $preserveSpeakerCluster)")
 
             val bytes: ByteArray = try {
                 readBytesFromUri(context, fileUri)
@@ -219,14 +286,19 @@ i+fozqmCTkpHUig37W5sLesojw==
 
             val mediaType = (context.contentResolver.getType(fileUri) ?: "audio/mpeg").toMediaTypeOrNull()
 
-            val requestBody = MultipartBody.Builder()
+            val builder = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart(
                     "file",
                     fileName,
                     bytes.toRequestBody(mediaType)
                 )
-                .build()
+
+            if (preserveSpeakerCluster != null) {
+                builder.addFormDataPart("preserve_speaker_cluster", preserveSpeakerCluster.toString())
+            }
+
+            val requestBody = builder.build()
 
             val request = Request.Builder()
                 .url("$DIRECT_CLOUD_URL/jobs/submit")

@@ -23,6 +23,7 @@ def process_audio_file(
     output_file: str,
     target_embedding: np.ndarray = None,
     target_profile_name: str = None,
+    preserve_speaker_cluster: int = None,
     similarity_threshold: float = 0.50,
     target_gender: str = "female",
     progress_callback = None
@@ -106,24 +107,29 @@ def process_audio_file(
         durations = np.array([seg['end_sec'] - seg['start_sec'] for seg in valid_segments])
         total_speech_dur = np.sum(durations)
         
-        # 2. Speaker Diarization into 2 speaker clusters via Agglomerative Clustering
+        # 2. Balanced 2-Speaker Diarization (each speaker >= 10% speech time)
         if len(valid_segments) >= 2:
             try:
-                from sklearn.cluster import AgglomerativeClustering
-                clustering = AgglomerativeClustering(n_clusters=min(2, len(valid_segments)), metric='cosine', linkage='average').fit(embeddings_arr)
-                cluster_labels = clustering.labels_
+                from sklearn.cluster import KMeans
+                kmeans = KMeans(n_clusters=2, random_state=42, n_init=20).fit(embeddings_arr)
+                cluster_labels = kmeans.labels_
                 
-                # Calculate mean similarity per speaker cluster
+                # Calculate mean similarity & speech time for each speaker cluster
                 cluster_sims = {}
-                for cid in set(cluster_labels):
+                for cid in [0, 1]:
                     mask = (cluster_labels == cid)
-                    mean_sim = float(np.mean(sims_arr[mask]))
-                    dur = float(np.sum(durations[mask]))
+                    mean_sim = float(np.mean(sims_arr[mask])) if np.any(mask) else 0.0
+                    dur = float(np.sum(durations[mask])) if np.any(mask) else 0.0
                     cluster_sims[cid] = (mean_sim, dur)
-                    print(f"   -> Speaker Cluster {cid}: Mean Sim = {mean_sim:.3f} | Speech Time = {dur:.1f}s")
+                    print(f"   -> Speaker Cluster {cid}: Mean Sim = {mean_sim:.3f} | Speech Time = {dur:.1f}s ({dur/total_speech_dur*100:.1f}%)")
                     
-                # 3. MANDATORILY assign the cluster with the highest mean similarity as the Target Speaker
-                target_cluster_id = max(cluster_sims, key=lambda k: cluster_sims[k][0])
+                # MANDATORILY assign the cluster with the highest mean similarity as the Target Speaker (or user selected override)
+                if preserve_speaker_cluster is not None and preserve_speaker_cluster in [0, 1]:
+                    target_cluster_id = preserve_speaker_cluster
+                    print(f"[Pipeline] User explicitly selected Speaker Cluster {target_cluster_id} to preserve!")
+                else:
+                    target_cluster_id = max(cluster_sims, key=lambda k: cluster_sims[k][0])
+
                 target_mask = (cluster_labels == target_cluster_id)
                 preserved_dur = cluster_sims[target_cluster_id][1]
                 

@@ -212,6 +212,10 @@ fun VoiceChangerScreen() {
         LogManager.i(context, "APP", "VoiceChanger App Launched.")
     }
 
+    var isAnalyzingPreview by remember { mutableStateOf(false) }
+    var previewData by remember { mutableStateOf<DiarizePreviewResponse?>(null) }
+    var selectedPreserveCluster by remember { mutableStateOf(0) }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -222,9 +226,24 @@ fun VoiceChangerScreen() {
             selectedFileName = rawName.substringAfterLast('/').substringAfterLast(':').ifEmpty { "Selected Audio File" }
             convertedFile = null
             errorMessage = null
-            statusMessage = "File selected. Tap 'Convert Voice via Cloud'."
+            previewData = null
+            statusMessage = "File selected. Analyzing speakers..."
             LogManager.i(context, "UI", "Selected file: $selectedFileName ($uri)")
             refreshLogs()
+
+            coroutineScope.launch {
+                isAnalyzingPreview = true
+                val res = CloudApiClient.fetchDiarizePreview(context, uri)
+                isAnalyzingPreview = false
+                res.onSuccess { data ->
+                    previewData = data
+                    selectedPreserveCluster = 0
+                    statusMessage = "Speakers analyzed! Play sample audio for Speaker A & Speaker B to choose which voice to preserve."
+                }.onFailure { err ->
+                    statusMessage = "File selected. Tap 'Convert Voice via Cloud'."
+                }
+                refreshLogs()
+            }
         }
     }
 
@@ -277,7 +296,7 @@ fun VoiceChangerScreen() {
         refreshLogs()
 
         coroutineScope.launch {
-            val submitResult = CloudApiClient.submitJob(context, uri)
+            val submitResult = CloudApiClient.submitJob(context, uri, preserveSpeakerCluster = selectedPreserveCluster)
             refreshLogs()
             submitResult.onSuccess { jobId ->
                 statusMessage = "Job created! Processing on Cloud..."
@@ -411,6 +430,123 @@ fun VoiceChangerScreen() {
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
+                            }
+
+                            if (isAnalyzingPreview) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(top = 8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = Color(0xFF1DB954),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Text("Analyzing speakers & generating audio previews...", color = Color.Gray, fontSize = 13.sp)
+                                }
+                            }
+
+                            if (previewData != null) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "Choose Voice to PRESERVE (Touch ▶ to listen):",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+
+                                    val prev = previewData!!
+
+                                    // Speaker A Card
+                                    val isPlayingA = currentlyPlayingKey == "PREV_SPK_A" && activeMediaPlayer?.isPlaying == true
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (selectedPreserveCluster == 0) Color(0xFF1DB954).copy(alpha = 0.25f) else Color(0xFF2A2A2A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                RadioButton(
+                                                    selected = (selectedPreserveCluster == 0),
+                                                    onClick = { selectedPreserveCluster = 0 },
+                                                    colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                                )
+                                                Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                    Text("Speaker A", fontWeight = FontWeight.Bold, color = Color.White)
+                                                    Text("${prev.speakerAPct}% speech time (${prev.speakerADurSec}s)", color = Color.LightGray, fontSize = 12.sp)
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    toggleAudioPlayback("PREV_SPK_A") {
+                                                        val mp = MediaPlayer()
+                                                        mp.setDataSource(prev.speakerAUrl)
+                                                        mp.prepare()
+                                                        mp
+                                                    }
+                                                }
+                                            ) {
+                                                Text(if (isPlayingA) "⏸" else "▶", fontSize = 20.sp, color = Color.White)
+                                            }
+                                        }
+                                    }
+
+                                    // Speaker B Card
+                                    val isPlayingB = currentlyPlayingKey == "PREV_SPK_B" && activeMediaPlayer?.isPlaying == true
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (selectedPreserveCluster == 1) Color(0xFF1DB954).copy(alpha = 0.25f) else Color(0xFF2A2A2A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                RadioButton(
+                                                    selected = (selectedPreserveCluster == 1),
+                                                    onClick = { selectedPreserveCluster = 1 },
+                                                    colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                                )
+                                                Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                    Text("Speaker B", fontWeight = FontWeight.Bold, color = Color.White)
+                                                    Text("${prev.speakerBPct}% speech time (${prev.speakerBDurSec}s)", color = Color.LightGray, fontSize = 12.sp)
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    toggleAudioPlayback("PREV_SPK_B") {
+                                                        val mp = MediaPlayer()
+                                                        mp.setDataSource(prev.speakerBUrl)
+                                                        mp.prepare()
+                                                        mp
+                                                    }
+                                                }
+                                            ) {
+                                                Text(if (isPlayingB) "⏸" else "▶", fontSize = 20.sp, color = Color.White)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

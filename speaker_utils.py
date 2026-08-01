@@ -1,34 +1,82 @@
 import os
 import tempfile
 import subprocess
-import torch
+import soundfile as sf
 import numpy as np
 import librosa
-import soundfile as sf
 from pydub import AudioSegment
 
-device = "cpu"
-_encoder_classifier = None
+try:
+    import torch
+    import speechbrain as sb
+    from speechbrain.inference.speaker import EncoderClassifier
+    SPEECHBRAIN_AVAILABLE = True
+except ImportError:
+    SPEECHBRAIN_AVAILABLE = False
+
+try:
+    from pyannote.audio import Pipeline
+    PYANNOTE_AVAILABLE = True
+except ImportError:
+    PYANNOTE_AVAILABLE = False
+
+
+_speaker_encoder = None
+_pyannote_pipeline = None
 
 
 def get_speaker_encoder():
     """
-    Lazy loader for SpeechBrain ECAPA-TDNN speaker embedding classifier.
+    Lazy-loads and caches SpeechBrain ECAPA-TDNN embedding encoder model.
     """
-    global _encoder_classifier
-    if _encoder_classifier is None:
-        try:
-            from speechbrain.inference.speaker import EncoderClassifier
+    global _speaker_encoder
+    if _speaker_encoder is None:
+        if SPEECHBRAIN_AVAILABLE:
+            device = "cpu"
             print(f"[SpeakerUtils] Loading SpeechBrain ECAPA-TDNN model on device: {device}...")
-            _encoder_classifier = EncoderClassifier.from_hparams(
+            _speaker_encoder = EncoderClassifier.from_hparams(
                 source="speechbrain/spkrec-ecapa-voxceleb",
-                savedir="pretrained_models/spkrec-ecapa-voxceleb",
+                savedir="models/spkrec-ecapa-voxceleb",
                 run_opts={"device": device}
             )
+        else:
+            print("[SpeakerUtils] Warning: SpeechBrain unavailable.")
+    return _speaker_encoder
+
+
+def extract_embedding(audio_data, sr=16000):
+    """
+    Extracts a 192-dimensional speaker embedding vector from raw mono audio numpy array.
+    """
+    encoder = get_speaker_encoder()
+    if encoder is not None:
+        try:
+            tensor = torch.tensor(audio_data).unsqueeze(0)
+            with torch.no_grad():
+                emb = encoder.encode_batch(tensor)
+                emb = emb.squeeze().cpu().numpy()
+            return emb
         except Exception as e:
-            print(f"[SpeakerUtils] Warning: SpeechBrain model loading error: {e}")
-            _encoder_classifier = None
-    return _encoder_classifier
+            print(f"[SpeakerUtils] SpeechBrain extraction error: {e}")
+            
+    # Fallback to spectral feature statistics (MFCCs + Delta statistics)
+    mfcc = librosa.feature.mfcc(y=audio_data, sr=sr, n_mfcc=20)
+    delta = librosa.feature.delta(mfcc)
+    stats = np.hstack([np.mean(mfcc, axis=1), np.std(mfcc, axis=1), np.mean(delta, axis=1), np.std(delta, axis=1)])
+    return stats
+
+
+def cosine_similarity(emb1, emb2):
+    """
+    Computes cosine similarity between two embedding vectors (-1.0 to +1.0).
+    """
+    if emb1 is None or emb2 is None or len(emb1) == 0 or len(emb2) == 0:
+        return 0.0
+    norm1 = np.linalg.norm(emb1)
+    norm2 = np.linalg.norm(emb2)
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return float(np.dot(emb1, emb2) / (norm1 * norm2))
 
 
 def load_audio_mono(audio_path, target_sr=16000):
@@ -47,106 +95,17 @@ def load_target_profile(path="target_speaker_profile.npy"):
     return np.zeros(195, dtype=np.float32)
 
 
-def extract_embedding(audio_path_or_ndarray, sr=16000):
+def fast_vad_split(y, top_db=30, frame_length=2048, hop_length=512):
     """
-    Extracts a speaker embedding vector combining SpeechBrain ECAPA-TDNN 192-dim vector
-    with normalized pitch F0 statistics to sharply separate distinct speakers.
+    Vectorized RMS energy VAD thresholding for split detection.
     """
-    encoder = get_speaker_encoder()
-    emb_np = None
-    if encoder is not None:
-        try:
-            if isinstance(audio_path_or_ndarray, str):
-                signal, fs = load_audio_mono(audio_path_or_ndarray, target_sr=16000)
-            else:
-                signal = audio_path_or_ndarray
-                fs = sr
-            
-            wav_tensor = torch.tensor(signal, dtype=torch.float32).unsqueeze(0).to(device)
-            with torch.no_grad():
-                embeddings = encoder.encode_batch(wav_tensor)
-                emb_np = embeddings.squeeze().cpu().numpy()
-                norm = np.linalg.norm(emb_np)
-                if norm > 0:
-                    emb_np = emb_np / norm
-        except Exception as e:
-            print(f"[SpeakerUtils] SpeechBrain embedding extraction fallback due to: {e}")
-    
-    if isinstance(audio_path_or_ndarray, str):
-        y, sr = load_audio_mono(audio_path_or_ndarray, target_sr=16000)
-    else:
-        y = audio_path_or_ndarray
-        sr = 16000
-
-    # Extract pitch (F0) feature
-    try:
-        import parselmouth
-        from parselmouth.praat import call
-        sound = parselmouth.Sound(y, sampling_frequency=sr)
-        pitch = sound.to_pitch(pitch_floor=75.0, pitch_ceiling=400.0)
-        mean_p = call(pitch, "Get mean", 0, 0, "Hertz")
-        std_p = call(pitch, "Get standard deviation", 0, 0, "Hertz")
-        if np.isnan(mean_p): mean_p = 0.0
-        if np.isnan(std_p): std_p = 0.0
-    except Exception:
-        mean_p, std_p = 0.0, 0.0
-
-    pitch_feat = np.array([mean_p / 300.0 * 3.0, std_p / 100.0 * 1.5])
-    
-    if emb_np is not None:
-        combined = np.hstack([emb_np, pitch_feat])
-        return combined / np.linalg.norm(combined)
-
-    # Fallback to acoustic feature vector (MFCC + Delta + Pitch stats)
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
-    mfcc_mean = np.mean(mfcc, axis=1)
-    mfcc_std = np.std(mfcc, axis=1)
-    delta = librosa.feature.delta(mfcc)
-    delta_mean = np.mean(delta, axis=1)
-    
-    feature_vec = np.hstack([mfcc_mean, mfcc_std, delta_mean, pitch_feat])
-    norm = np.linalg.norm(feature_vec)
-    if norm > 0:
-        feature_vec = feature_vec / norm
-    return feature_vec
-
-
-def cosine_similarity(emb1, emb2):
-    """
-    Computes cosine similarity between two embedding vectors.
-    """
-    emb1 = np.asarray(emb1).flatten()
-    emb2 = np.asarray(emb2).flatten()
-    if len(emb1) != len(emb2):
-        # Truncate or pad if dimensions mismatch
-        min_len = min(len(emb1), len(emb2))
-        emb1 = emb1[:min_len]
-        emb2 = emb2[:min_len]
-    
-    norm1 = np.linalg.norm(emb1)
-    norm2 = np.linalg.norm(emb2)
-    if norm1 == 0 or norm2 == 0:
-        return 0.0
-    return float(np.dot(emb1, emb2) / (norm1 * norm2))
-
-
-def fast_vad_split(y, top_db=30, frame_length=2048, hop_length=2048):
-    """
-    Instant 1D Reshaped NumPy RMS energy VAD splitter (0.006s for 6.5 min audio).
-    """
-    if len(y) < hop_length:
-        return [(0, len(y))]
-    
-    num_frames = len(y) // hop_length
-    y_trunc = y[:num_frames * hop_length].reshape(num_frames, hop_length)
-    rms = np.sqrt(np.mean(y_trunc ** 2, axis=1))
-    rms_db = 20.0 * np.log10(np.maximum(rms, 1e-7))
-    ref = np.max(rms_db)
-    non_silent = rms_db > (ref - top_db)
+    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
+    db = librosa.amplitude_to_db(rms, ref=np.max)
+    non_silent = db > -top_db
     
     if not np.any(non_silent):
-        return []
-
+        return [(0, len(y))]
+        
     edges = np.diff(non_silent.astype(int))
     starts = np.where(edges == 1)[0] + 1
     ends = np.where(edges == -1)[0] + 1
@@ -204,7 +163,6 @@ def segment_audio_vad(audio_path, top_db=30, min_speech_duration_ms=300, max_chu
                     'sr': sr
                 })
         else:
-            # Sub-chunk long speech bursts into 2-second sub-windows
             for sub_s in range(start, end, chunk_samples):
                 sub_e = min(sub_s + chunk_samples, end)
                 if sub_e - sub_s >= int(0.5 * sr):
@@ -219,89 +177,94 @@ def segment_audio_vad(audio_path, top_db=30, min_speech_duration_ms=300, max_chu
 
 
 def suppress_background_noise(y, sr=16000, highpass_cutoff=80.0, lowpass_cutoff=7600.0):
-    """
-    Suppresses ambient background noise and isolates human speech frequencies:
-    1. Butterworth bandpass filter (80 Hz - 7600 Hz) to eliminate DC rumble, wind, and electrical hiss.
-    2. Spectral noise gating / reduction to attenuate stationary background noise.
-    """
     if len(y) == 0:
         return y
         
     try:
         from scipy.signal import butter, sosfilt
-        # 1. Bandpass filter for human vocal frequency range (80 Hz to 7600 Hz)
         sos = butter(4, [highpass_cutoff, lowpass_cutoff], btype='bandpass', fs=sr, output='sos')
         filtered_y = sosfilt(sos, y)
         
-        # 2. Spectral noise reduction (using noisereduce or spectral thresholding)
         try:
             import noisereduce as nr
             reduced_y = nr.reduce_noise(y=filtered_y, sr=sr, stationary=True, prop_decrease=0.75)
             return reduced_y.astype(np.float32)
         except ImportError:
-            # Fallback STFT spectral gating
             stft = librosa.stft(filtered_y, n_fft=1024, hop_length=256)
             magnitude, phase = librosa.magphase(stft)
-            
-            # Estimate noise floor from lowest 10th percentile magnitude frames
             noise_floor = np.percentile(magnitude, 10, axis=1, keepdims=True)
             mask = magnitude > (noise_floor * 1.4)
             clean_magnitude = magnitude * mask.astype(np.float32)
-            
             clean_stft = clean_magnitude * phase
             clean_y = librosa.istft(clean_stft, hop_length=256, length=len(y))
             return clean_y.astype(np.float32)
     except Exception as e:
-        print(f"[NoiseSuppression] Fallback due to: {e}")
-        return y.astype(np.float32)
+        print(f"[NoiseFilter] Exception during noise suppression: {e}")
+        return y
 
 
-_pyannote_pipeline = None
-
-
-def get_pyannote_pipeline():
+def generate_speaker_previews(audio_path: str, output_dir: str):
     """
-    Lazy loader for pyannote.audio speaker diarization pipeline.
+    Diarizes an input audio recording into 2 speakers and extracts representative
+    5-second audio preview clips for Speaker A (Cluster 0) and Speaker B (Cluster 1).
+    Returns dict with stats and file paths for speaker_a and speaker_b sample clips.
     """
-    global _pyannote_pipeline
-    if _pyannote_pipeline is None:
-        try:
-            from pyannote.audio import Pipeline
-            hf_token = os.environ.get("HF_TOKEN", None)
-            if hf_token:
-                print(f"[Pyannote] Loading pyannote/speaker-diarization-3.1 model...")
-                _pyannote_pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-3.1",
-                    use_auth_token=hf_token
-                )
-                if torch.cuda.is_available():
-                    _pyannote_pipeline.to(torch.device("cuda"))
-        except Exception as e:
-            print(f"[Pyannote] Notice: pyannote pipeline loading deferred or HF_TOKEN missing ({e})")
-            _pyannote_pipeline = None
-    return _pyannote_pipeline
+    os.makedirs(output_dir, exist_ok=True)
+    segments, full_y, sr = segment_audio_vad(audio_path)
+    valid_segs = [s for s in segments if len(s['audio_data'])/sr >= 0.3]
+    
+    if len(valid_segs) == 0:
+        valid_segs = segments
+        
+    durations = np.array([s['end_sec'] - s['start_sec'] for s in valid_segs])
+    total_dur = np.sum(durations)
+    
+    embeddings = np.array([extract_embedding(s['audio_data'][:int(2.0*sr)], sr=sr) for s in valid_segs])
+    
+    from sklearn.cluster import KMeans
+    n_clusters = min(2, len(valid_segs))
+    if n_clusters >= 2:
+        km = KMeans(n_clusters=2, random_state=42, n_init=20).fit(embeddings)
+        cluster_labels = km.labels_
+    else:
+        cluster_labels = np.zeros(len(valid_segs), dtype=int)
 
+    spk_audio = {0: [], 1: []}
+    spk_durs = {0: 0.0, 1: 0.0}
+    
+    for i, seg in enumerate(valid_segs):
+        cid = cluster_labels[i]
+        spk_durs[cid] += (seg['end_sec'] - seg['start_sec'])
+        if (len(spk_audio[cid]) * (1.0 / sr)) < 6.0:  # Max 6s sample clip
+            spk_audio[cid].append(seg['audio_data'])
 
-def diarize_speakers_pyannote(audio_path):
-    """
-    Runs pyannote.audio speaker diarization to separate Speaker A and Speaker B turns.
-    Returns list of dicts: [{'start_sec': float, 'end_sec': float, 'speaker': str}]
-    """
-    pipeline = get_pyannote_pipeline()
-    turns = []
-    if pipeline is not None:
-        try:
-            diarization = pipeline(audio_path)
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
-                turns.append({
-                    'start_sec': turn.start,
-                    'end_sec': turn.end,
-                    'speaker': speaker
-                })
-            print(f"[Pyannote] Diarized {len(turns)} speaker turns.")
-            return turns
-        except Exception as e:
-            print(f"[Pyannote] Diarization execution exception: {e}")
-    return turns
+    pct_0 = round((spk_durs[0] / total_dur) * 100.0, 1) if total_dur > 0 else 50.0
+    pct_1 = round((spk_durs[1] / total_dur) * 100.0, 1) if total_dur > 0 else 50.0
 
+    audio_a = np.concatenate(spk_audio[0]) if len(spk_audio[0]) > 0 else full_y[:int(5.0*sr)]
+    audio_b = np.concatenate(spk_audio[1]) if len(spk_audio[1]) > 0 else full_y[:int(5.0*sr)]
 
+    path_a = os.path.join(output_dir, "speaker_a.mp3")
+    path_b = os.path.join(output_dir, "speaker_b.mp3")
+
+    wav_a = os.path.join(output_dir, "speaker_a.wav")
+    wav_b = os.path.join(output_dir, "speaker_b.wav")
+    
+    sf.write(wav_a, audio_a, sr)
+    sf.write(wav_b, audio_b, sr)
+
+    try:
+        AudioSegment.from_wav(wav_a).export(path_a, format="mp3", bitrate="128k")
+        AudioSegment.from_wav(wav_b).export(path_b, format="mp3", bitrate="128k")
+    except Exception:
+        sf.write(path_a, audio_a, sr)
+        sf.write(path_b, audio_b, sr)
+
+    return {
+        "speaker_a_pct": pct_0,
+        "speaker_b_pct": pct_1,
+        "speaker_a_dur_s": round(spk_durs[0], 1),
+        "speaker_b_dur_s": round(spk_durs[1], 1),
+        "speaker_a_path": path_a,
+        "speaker_b_path": path_b
+    }
