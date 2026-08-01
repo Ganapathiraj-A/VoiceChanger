@@ -72,35 +72,45 @@ def process_audio_file(
     if len(valid_segments) == 0:
         valid_segments = segments
 
-    # Evaluate every segment for precise speaker identification
+    has_target_profile = (target_embedding is not None and np.any(target_embedding != 0))
     tot_segs = len(valid_segments)
     classified = []
 
-    for i, seg in enumerate(valid_segments):
-        _report_progress(15.0 + ((i + 1) / max(1, tot_segs)) * 20.0, f"Classifying speaker ({i+1}/{tot_segs})...")
-        seg_audio = seg['audio_data']
-        dur = len(seg_audio) / sr
-        
-        if dur > 3.0:
-            center_sample = len(seg_audio) // 2
-            half_win = int(1.5 * sr)
-            s_start = max(0, center_sample - half_win)
-            s_end = min(len(seg_audio), center_sample + half_win)
-            seg_emb = extract_embedding(seg_audio[s_start:s_end], sr=sr)
-        else:
-            seg_emb = extract_embedding(seg_audio, sr=sr)
+    if not has_target_profile:
+        print("[!] No target speaker profile provided. Transforming all detected speech segments.")
+        for seg in valid_segments:
+            classified.append({
+                'start_sec': seg['start_sec'],
+                'end_sec': seg['end_sec'],
+                'is_target': False,
+                'sim': 0.0
+            })
+    else:
+        # Fast sub-sampled speaker classification (max 8 representative segments to avoid long CPU delays)
+        sample_indices = np.linspace(0, tot_segs - 1, min(8, tot_segs), dtype=int)
+        sample_embeddings = []
+        for idx in sample_indices:
+            seg = valid_segments[idx]
+            seg_audio = seg['audio_data']
+            seg_emb = extract_embedding(seg_audio[:int(2.0 * sr)], sr=sr)
+            sim = cosine_similarity(seg_emb, target_embedding)
+            sample_embeddings.append((idx, sim))
             
-        sim = cosine_similarity(seg_emb, target_embedding)
-        is_target = (sim >= similarity_threshold)
+        sim_dict = {idx: sim for idx, sim in sample_embeddings}
+        
+        for i, seg in enumerate(valid_segments):
+            # Interpolate or match nearest sampled similarity
+            nearest_idx = min(sample_indices, key=lambda x: abs(x - i))
+            sim = sim_dict.get(nearest_idx, 0.0)
+            is_target = (sim >= similarity_threshold)
+            classified.append({
+                'start_sec': seg['start_sec'],
+                'end_sec': seg['end_sec'],
+                'is_target': is_target,
+                'sim': sim
+            })
 
-        classified.append({
-            'start_sec': seg['start_sec'],
-            'end_sec': seg['end_sec'],
-            'is_target': is_target,
-            'sim': sim
-        })
-
-    # Group non-target segments into continuous unbroken transform blocks (0.2s max gap)
+    # Group non-target segments into continuous unbroken transform blocks (0.5s max gap)
     merged_blocks = []
     curr_block = None
     preserved_count = 0
@@ -115,8 +125,7 @@ def process_audio_file(
             if curr_block is None:
                 curr_block = {'start_sec': seg['start_sec'], 'end_sec': seg['end_sec']}
             else:
-                # Merge only tight adjacent non-target segments (gap <= 0.2s) to protect target speech turns
-                if seg['start_sec'] - curr_block['end_sec'] <= 0.2:
+                if seg['start_sec'] - curr_block['end_sec'] <= 0.5:
                     curr_block['end_sec'] = seg['end_sec']
                 else:
                     merged_blocks.append(curr_block)
@@ -124,6 +133,11 @@ def process_audio_file(
 
     if curr_block is not None:
         merged_blocks.append(curr_block)
+
+    # Fallback: if all segments were preserved but user requested voice conversion, convert entire file
+    if len(merged_blocks) == 0 and tot_segs > 0:
+        print("[!] Defaulting to transforming all speech segments to fulfill voice conversion request.")
+        merged_blocks = [{'start_sec': valid_segments[0]['start_sec'], 'end_sec': valid_segments[-1]['end_sec']}]
 
     print(f"   -> Classification Summary:")
     print(f"      - Target Voice Preserved: {preserved_count} segments")

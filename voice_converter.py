@@ -29,9 +29,8 @@ def convert_voice_ai(
 ):
     """
     Executes Zero-Shot AI Voice Conversion:
-    1. Extracts source speech acoustic representation & F0 pitch contour.
-    2. Maps speaker timbre embedding towards requested target identity/gender.
-    3. Synthesizes natural, human-sounding target voice.
+    1. Pitch shift (+7 semitones for male->female, -7 semitones for female->male).
+    2. Zero-shot spectral formant envelope mapping to transform speaker timbre.
     """
     model_info = get_ai_vc_model()
     device = model_info["device"]
@@ -42,26 +41,28 @@ def convert_voice_ai(
             sf.write(output_audio_path, np.zeros(1600, dtype=np.float32), sr)
             return True
             
-        # Neural spectral envelope & pitch transformation (Zero-Shot AI Timbre Alignment)
-        stft = librosa.stft(y, n_fft=1024, hop_length=256)
+        if target_gender.lower() in ["female", "f"]:
+            n_steps = +7.0
+            shift_bins = 5
+        else:
+            n_steps = -7.0
+            shift_bins = -5
+
+        # 1. Pitch shift using high-quality phase vocoder
+        y_pitched = librosa.effects.pitch_shift(y, sr=sr, n_steps=n_steps)
+        
+        # 2. Zero-shot spectral formant envelope shift
+        stft = librosa.stft(y_pitched, n_fft=1024, hop_length=256)
         magnitude, phase = librosa.magphase(stft)
         
-        # Pitch & Formant Envelope Shift for natural zero-shot acoustic timbre target
-        if target_gender.lower() in ["female", "f"]:
-            shift_bins = 4
-        else:
-            shift_bins = -4
-            
-        # Shift spectral magnitude envelope along frequency bins
         if shift_bins > 0:
             shifted_mag = np.pad(magnitude[shift_bins:], ((0, shift_bins), (0, 0)), mode='edge')
         else:
             sb = abs(shift_bins)
             shifted_mag = np.pad(magnitude[:-sb], ((sb, 0), (0, 0)), mode='edge')
             
-        # Reconstruct high-fidelity audio via inverse STFT
         resynthesized_stft = shifted_mag * phase
-        converted_y = librosa.istft(resynthesized_stft, hop_length=256, length=len(y))
+        converted_y = librosa.istft(resynthesized_stft, hop_length=256, length=len(y_pitched))
         
         # Normalize peak audio amplitude
         max_val = np.max(np.abs(converted_y))
@@ -69,13 +70,14 @@ def convert_voice_ai(
             converted_y = (converted_y / max_val) * 0.90
             
         sf.write(output_audio_path, converted_y, sr)
-        print(f"[AI-VoiceConverter] Successfully converted voice to target profile ({target_gender}) on {device}")
+        print(f"[AI-VoiceConverter] Successfully converted voice to ({target_gender}) on {device}")
         return True
     except Exception as e:
         print(f"[AI-VoiceConverter] Error during neural conversion: {e}")
         y, sr = librosa.load(source_audio_path, sr=16000)
         sf.write(output_audio_path, y, sr)
         return False
+
 
 
 def convert_gender_auto(audio_path, output_path, target_gender="auto"):
