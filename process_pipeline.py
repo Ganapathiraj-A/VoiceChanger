@@ -94,22 +94,52 @@ def process_audio_file(
             })
     else:
         print(f"[!] Pre-recorded target voice profile detected. Preserving target voice & converting remaining speakers.")
-        # Fast sub-sampled speaker classification (max 10 representative segments to preserve accuracy & speed)
-        sample_indices = np.linspace(0, tot_segs - 1, min(10, tot_segs), dtype=int)
-        sample_embeddings = []
-        for idx in sample_indices:
-            seg = valid_segments[idx]
+        # Extract embeddings for valid segments
+        segment_embeddings = []
+        for seg in valid_segments:
             seg_audio = seg['audio_data']
             seg_emb = extract_embedding(seg_audio[:int(2.0 * sr)], sr=sr)
             sim = cosine_similarity(seg_emb, target_embedding)
-            sample_embeddings.append((idx, sim))
+            segment_embeddings.append(sim)
             
-        sim_dict = {idx: sim for idx, sim in sample_embeddings}
+        # Calculate segment speech durations
+        durations = np.array([seg['end_sec'] - seg['start_sec'] for seg in valid_segments])
+        total_speech_dur = np.sum(durations)
+        min_preserved_dur = 0.10 * total_speech_dur  # Minimum 10% speech duration rule
         
+        # Adaptive 2-cluster separation to cleanly split Target Speaker vs Non-Target Speakers
+        if len(sims_arr) >= 4:
+            try:
+                from sklearn.cluster import KMeans
+                kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(sims_arr.reshape(-1, 1))
+                centers = kmeans.cluster_centers_.flatten()
+                target_cluster_idx = np.argmax(centers)
+                target_mask = (kmeans.labels_ == target_cluster_idx)
+            except Exception:
+                target_mask = (sims_arr >= similarity_threshold)
+        else:
+            target_mask = (sims_arr >= similarity_threshold)
+
+        # Enforce Rule: At least one voice profile MUST match and be preserved for minimum 10% of total speech time
+        preserved_dur = np.sum(durations[target_mask])
+        if preserved_dur < min_preserved_dur:
+            # Select top highest-similarity segments until minimum 10% speech time is preserved
+            sorted_indices = np.argsort(-sims_arr)
+            acc_dur = 0.0
+            forced_mask = np.zeros(len(sims_arr), dtype=bool)
+            for idx in sorted_indices:
+                forced_mask[idx] = True
+                acc_dur += durations[idx]
+                if acc_dur >= min_preserved_dur:
+                    break
+            target_mask = forced_mask
+            print(f"[Pipeline] Enforced 10% rule: Preserved top segments matching target voice ({acc_dur:.1f}s / {total_speech_dur:.1f}s)")
+        else:
+            print(f"[Pipeline] Target speaker preserved: {preserved_dur:.1f}s ({preserved_dur/total_speech_dur*100:.1f}% of total speech)")
+            
         for i, seg in enumerate(valid_segments):
-            nearest_idx = min(sample_indices, key=lambda x: abs(x - i))
-            sim = sim_dict.get(nearest_idx, 0.0)
-            is_target = (sim >= similarity_threshold)
+            is_target = bool(target_mask[i])
+            sim = float(sims_arr[i])
             classified.append({
                 'start_sec': seg['start_sec'],
                 'end_sec': seg['end_sec'],
