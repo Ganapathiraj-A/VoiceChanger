@@ -949,7 +949,7 @@ fun VoiceChangerScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "🎧 Converted Files History (Past ${minOf(5, historyFiles.size)} of ${historyFiles.size})",
+                            "🎧 Converted Files History (Past ${minOf(2, historyFiles.size)} of ${historyFiles.size})",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -966,7 +966,7 @@ fun VoiceChangerScreen() {
                             color = Color.Gray
                         )
                     } else {
-                        historyFiles.take(5).forEach { file ->
+                        historyFiles.take(2).forEach { file ->
                             val dateStr = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1040,89 +1040,6 @@ fun VoiceChangerScreen() {
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Debug Logs Section
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "📋 Debug Logs",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Button(
-                            onClick = {
-                                showLogs = !showLogs
-                                if (showLogs) refreshLogs()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
-                        ) {
-                            Text(if (showLogs) "Hide" else "View Logs", color = Color.White, fontSize = 12.sp)
-                        }
-                    }
-
-                    if (showLogs) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 220.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.Black)
-                                .padding(8.dp)
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            Text(
-                                logText,
-                                color = Color(0xFF00FF00),
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("VoiceChanger App Logs", logText)
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Logs Copied to Clipboard!", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF444444))
-                            ) {
-                                Text("Copy", fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = {
-                                    LogManager.clearLogs(context)
-                                    refreshLogs()
-                                    Toast.makeText(context, "Logs Cleared", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF662222))
-                            ) {
-                                Text("Clear", fontSize = 12.sp)
                             }
                         }
                     }
