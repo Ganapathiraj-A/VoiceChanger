@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -206,9 +207,111 @@ fun VoiceChangerScreen() {
         }
     }
 
+    val prefs = remember { context.getSharedPreferences("voice_changer_settings", Context.MODE_PRIVATE) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var autoLaunchOnCallEnd by remember { mutableStateOf(prefs.getBoolean("auto_launch_on_call_end", false)) }
+    var defaultFolderUriStr by remember { mutableStateOf(prefs.getString("default_folder_uri", null)) }
+    var defaultFolderName by remember { mutableStateOf(prefs.getString("default_folder_name", null)) }
+
+    val phoneStatePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            prefs.edit().putBoolean("auto_launch_on_call_end", true).apply()
+            autoLaunchOnCallEnd = true
+            Toast.makeText(context, "Post-call auto-launch enabled!", Toast.LENGTH_SHORT).show()
+        } else {
+            prefs.edit().putBoolean("auto_launch_on_call_end", false).apply()
+            autoLaunchOnCallEnd = false
+            Toast.makeText(context, "READ_PHONE_STATE permission required to detect call end", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                LogManager.e(context, "SETTINGS", "Failed to take persistable URI permission: ${e.message}")
+            }
+            val docFile = DocumentFile.fromTreeUri(context, treeUri)
+            val name = docFile?.name ?: treeUri.lastPathSegment ?: "Selected Folder"
+            prefs.edit()
+                .putString("default_folder_uri", treeUri.toString())
+                .putString("default_folder_name", name)
+                .apply()
+            defaultFolderUriStr = treeUri.toString()
+            defaultFolderName = name
+            Toast.makeText(context, "Default recording folder set to: $name", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun scanAndSelectLatestCallRecording() {
+        try {
+            var latestUri: Uri? = null
+            var latestName: String? = null
+
+            if (!defaultFolderUriStr.isNullOrBlank()) {
+                val treeUri = Uri.parse(defaultFolderUriStr)
+                val docFolder = DocumentFile.fromTreeUri(context, treeUri)
+                if (docFolder != null && docFolder.isDirectory) {
+                    val audioDoc = docFolder.listFiles()
+                        .filter { file ->
+                            val n = file.name ?: ""
+                            file.isFile && (n.endsWith(".mp3", true) || n.endsWith(".m4a", true) || n.endsWith(".wav", true) || n.endsWith(".3gp", true) || n.endsWith(".aac", true) || n.endsWith(".mp4", true))
+                        }
+                        .maxByOrNull { it.lastModified() }
+
+                    if (audioDoc != null) {
+                        latestUri = audioDoc.uri
+                        latestName = audioDoc.name
+                    }
+                }
+            }
+
+            if (latestUri == null) {
+                val candidates = listOf(
+                    File("/storage/emulated/0/Recordings/Call"),
+                    File("/storage/emulated/0/CallRecordings"),
+                    File("/storage/emulated/0/MIUI/sound_recorder/call_rec"),
+                    File("/storage/emulated/0/Recordings"),
+                    File("/storage/emulated/0/Music"),
+                    File("/storage/emulated/0/Download")
+                )
+                val candidateFiles = candidates
+                    .filter { it.exists() && it.isDirectory }
+                    .flatMap { dir ->
+                        dir.listFiles { f ->
+                            f.isFile && (f.name.endsWith(".mp3", true) || f.name.endsWith(".m4a", true) || f.name.endsWith(".wav", true) || f.name.endsWith(".3gp", true) || f.name.endsWith(".aac", true) || f.name.endsWith(".mp4", true))
+                        }?.toList() ?: emptyList()
+                    }
+                val latestFile = candidateFiles.maxByOrNull { it.lastModified() }
+                if (latestFile != null) {
+                    latestUri = Uri.fromFile(latestFile)
+                    latestName = latestFile.name
+                }
+            }
+
+            if (latestUri != null) {
+                selectedFileUri = latestUri
+                selectedFileName = latestName ?: "Latest Call Recording"
+                statusMessage = "Auto-selected latest call recording: $selectedFileName"
+                LogManager.i(context, "AUTO", "Auto-selected latest audio recording: $selectedFileName ($latestUri)")
+            }
+        } catch (e: Exception) {
+            LogManager.e(context, "AUTO", "Error scanning for latest recording: ${e.message}", e)
+        }
+    }
+
     LaunchedEffect(Unit) {
         refreshHistory()
         refreshLogs()
+        scanAndSelectLatestCallRecording()
         LogManager.i(context, "APP", "VoiceChanger App Launched.")
     }
 
@@ -949,7 +1052,7 @@ fun VoiceChangerScreen() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "🎧 Converted Files History (Past ${minOf(2, historyFiles.size)} of ${historyFiles.size})",
+                            "🎧 Converted Files History (Past ${minOf(5, historyFiles.size)} of ${historyFiles.size})",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -966,7 +1069,7 @@ fun VoiceChangerScreen() {
                             color = Color.Gray
                         )
                     } else {
-                        historyFiles.take(2).forEach { file ->
+                        historyFiles.take(5).forEach { file ->
                             val dateStr = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1045,6 +1148,121 @@ fun VoiceChangerScreen() {
                     }
                 }
             }
+
+            // Settings Button at Bottom of Main Screen
+            Card(
+                onClick = { showSettingsDialog = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⚙️", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("App & Call Recording Settings", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                            Text(
+                                if (autoLaunchOnCallEnd) "Post-call auto-launch: ON" else "Post-call auto-launch: OFF",
+                                fontSize = 12.sp,
+                                color = if (autoLaunchOnCallEnd) Color(0xFF1DB954) else Color.Gray
+                            )
+                        }
+                    }
+                    Text("Configure ▶", fontSize = 13.sp, color = Color(0xFF1DB954), fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Settings Dialog Modal
+        if (showSettingsDialog) {
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = {
+                    Text("⚙️ App & Call Settings", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        // Option 1: Post Call Auto Launch Toggle
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "Auto-Launch After Call Ends",
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = autoLaunchOnCallEnd,
+                                        onCheckedChange = { checked ->
+                                            if (checked) {
+                                                phoneStatePermissionLauncher.launch(android.Manifest.permission.READ_PHONE_STATE)
+                                            } else {
+                                                prefs.edit().putBoolean("auto_launch_on_call_end", false).apply()
+                                                autoLaunchOnCallEnd = false
+                                            }
+                                        },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF1DB954))
+                                    )
+                                }
+                                Text("Automatically launches VoiceChanger immediately when any phone call finishes.", fontSize = 11.sp, color = Color.LightGray)
+                            }
+                        }
+
+                        // Option 2: Default Call Recording Folder Selection
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Default Call Recording Folder:", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                Text(
+                                    defaultFolderName ?: "Not Set (Auto-scans System Call Record Folders)",
+                                    fontSize = 12.sp,
+                                    color = if (defaultFolderName != null) Color(0xFF1DB954) else Color.Gray
+                                )
+                                Button(
+                                    onClick = { folderPickerLauncher.launch(null) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(40.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                                ) {
+                                    Text("📁 Select Call Recording Folder", color = Color.White, fontSize = 12.sp)
+                                }
+                                Text("Automatically selects the newest recording from this folder when app opens after call.", fontSize = 11.sp, color = Color.LightGray)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showSettingsDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954))
+                    ) {
+                        Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                },
+                containerColor = Color(0xFF1E1E1E)
+            )
         }
     }
 }
