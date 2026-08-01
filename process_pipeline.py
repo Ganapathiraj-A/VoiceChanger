@@ -77,7 +77,7 @@ def process_audio_file(
     classified = []
 
     if not has_target_profile:
-        print("[!] No target speaker profile provided. Transforming all detected speech segments.")
+        print("[!] No pre-recorded target voice profile found. Converting all speech segments.")
         for seg in valid_segments:
             classified.append({
                 'start_sec': seg['start_sec'],
@@ -86,8 +86,9 @@ def process_audio_file(
                 'sim': 0.0
             })
     else:
-        # Fast sub-sampled speaker classification (max 8 representative segments to avoid long CPU delays)
-        sample_indices = np.linspace(0, tot_segs - 1, min(8, tot_segs), dtype=int)
+        print(f"[!] Pre-recorded target voice profile detected. Preserving target voice & converting remaining speakers.")
+        # Fast sub-sampled speaker classification (max 10 representative segments to preserve accuracy & speed)
+        sample_indices = np.linspace(0, tot_segs - 1, min(10, tot_segs), dtype=int)
         sample_embeddings = []
         for idx in sample_indices:
             seg = valid_segments[idx]
@@ -99,7 +100,6 @@ def process_audio_file(
         sim_dict = {idx: sim for idx, sim in sample_embeddings}
         
         for i, seg in enumerate(valid_segments):
-            # Interpolate or match nearest sampled similarity
             nearest_idx = min(sample_indices, key=lambda x: abs(x - i))
             sim = sim_dict.get(nearest_idx, 0.0)
             is_target = (sim >= similarity_threshold)
@@ -110,7 +110,7 @@ def process_audio_file(
                 'sim': sim
             })
 
-    # Group non-target segments into continuous unbroken transform blocks (0.5s max gap)
+    # Group non-target segments into continuous unbroken transform blocks (0.3s max gap)
     merged_blocks = []
     curr_block = None
     preserved_count = 0
@@ -125,7 +125,7 @@ def process_audio_file(
             if curr_block is None:
                 curr_block = {'start_sec': seg['start_sec'], 'end_sec': seg['end_sec']}
             else:
-                if seg['start_sec'] - curr_block['end_sec'] <= 0.5:
+                if seg['start_sec'] - curr_block['end_sec'] <= 0.3:
                     curr_block['end_sec'] = seg['end_sec']
                 else:
                     merged_blocks.append(curr_block)
@@ -134,14 +134,13 @@ def process_audio_file(
     if curr_block is not None:
         merged_blocks.append(curr_block)
 
-    # Fallback: if all segments were preserved but user requested voice conversion, convert entire file
-    if len(merged_blocks) == 0 and tot_segs > 0:
-        print("[!] Defaulting to transforming all speech segments to fulfill voice conversion request.")
+    # Fallback ONLY when no target profile is present and no blocks were created
+    if not has_target_profile and len(merged_blocks) == 0 and tot_segs > 0:
         merged_blocks = [{'start_sec': valid_segments[0]['start_sec'], 'end_sec': valid_segments[-1]['end_sec']}]
 
-    print(f"   -> Classification Summary:")
-    print(f"      - Target Voice Preserved: {preserved_count} segments")
-    print(f"      - Continuous Transform Blocks: {len(merged_blocks)} blocks")
+    print(f"   -> Classification & Selective Preservation Summary:")
+    print(f"      - Pre-Recorded Target Voice Preserved: {preserved_count} segments")
+    print(f"      - Non-Target Voices Gender Converted: {len(merged_blocks)} blocks")
 
     print("[3/4] Transforming gender across continuous speech blocks...")
     tot_blocks = len(merged_blocks)
