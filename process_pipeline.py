@@ -111,6 +111,9 @@ def process_audio_file(
                 from sklearn.cluster import KMeans
                 kmeans = KMeans(n_clusters=2, random_state=42, n_init=20).fit(embeddings_arr)
                 cluster_labels = kmeans.labels_
+                # Canonical cluster alignment: Cluster 0 is ALWAYS the first speaker who speaks in the recording
+                if len(cluster_labels) > 0 and cluster_labels[0] != 0:
+                    cluster_labels = 1 - cluster_labels
                 
                 # Calculate mean similarity & speech time for each speaker cluster
                 cluster_sims = {}

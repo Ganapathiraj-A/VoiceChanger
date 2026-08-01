@@ -274,6 +274,9 @@ def generate_speaker_previews(audio_path: str, output_dir: str, progress_callbac
     if n_clusters >= 2:
         km = KMeans(n_clusters=2, random_state=42, n_init=20).fit(embeddings)
         cluster_labels = km.labels_
+        # Canonical cluster alignment: Cluster 0 is ALWAYS the first speaker who speaks in the recording
+        if len(cluster_labels) > 0 and cluster_labels[0] != 0:
+            cluster_labels = 1 - cluster_labels
     else:
         cluster_labels = np.zeros(len(preview_segs), dtype=int)
 

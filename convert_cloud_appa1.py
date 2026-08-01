@@ -48,17 +48,10 @@ print("\nSpeaker Diarization Stats:")
 print(f"  - Speaker A (id=0): {speaker_a['speech_percent']}% speech ({speaker_a['duration_seconds']}s)")
 print(f"  - Speaker B (id=1): {speaker_b['speech_percent']}% speech ({speaker_b['duration_seconds']}s)")
 
-# Choose speaker with least talk time to be preserved
-if speaker_a["speech_percent"] < speaker_b["speech_percent"]:
-    preserve_cluster = 0
-    preserved_speaker_name = "Speaker A"
-    least_pct = speaker_a["speech_percent"]
-else:
-    preserve_cluster = 1
-    preserved_speaker_name = "Speaker B"
-    least_pct = speaker_b["speech_percent"]
-
-print(f"\nSelected Speaker to PRESERVE: {preserved_speaker_name} (cluster={preserve_cluster}) with least talk time ({least_pct}%)")
+# Explicitly preserve Speaker A
+preserve_cluster = 0
+preserved_speaker_name = "Speaker A"
+print(f"\nSelected Speaker to PRESERVE: {preserved_speaker_name} (cluster={preserve_cluster})")
 
 print("\n4. Submitting Full Audio Conversion Job to Cloud Backend...")
 with open(FILE_PATH, "rb") as f:
@@ -98,7 +91,7 @@ print("\nConversion Job Completed!")
 download_url = f"{CLOUD_URL}{job_data['download_url']}"
 print(f"Download URL: {download_url}")
 
-output_local_path = "/home/ganapathiraj/Code/Android/VoiceChanger/output/appa_1_cloud_converted_least_speaker.mp3"
+output_local_path = "/home/ganapathiraj/Code/Android/VoiceChanger/output/appa_1_cloud_converted_speaker_a.mp3"
 os.makedirs("/home/ganapathiraj/Code/Android/VoiceChanger/output", exist_ok=True)
 print(f"Downloading converted audio file to {output_local_path}...")
 r = requests.get(download_url)
