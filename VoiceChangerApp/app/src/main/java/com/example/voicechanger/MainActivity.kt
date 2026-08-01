@@ -235,6 +235,7 @@ fun VoiceChangerScreen() {
             convertedFile = null
             errorMessage = null
             previewData = null
+            showAdvancedOptions = false
             statusMessage = "File selected. Analyzing speakers..."
             LogManager.i(context, "UI", "Selected file: $selectedFileName ($uri)")
             refreshLogs()
