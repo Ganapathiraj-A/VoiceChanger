@@ -149,7 +149,8 @@ def process_audio_file(
                 'sim': sim
             })
 
-    # Group non-target segments into continuous unbroken transform blocks (0.3s max gap)
+    # Group non-target segments into continuous unbroken transform blocks (0.3s max gap, 10s max block duration)
+    MAX_BLOCK_DURATION_SEC = 10.0
     merged_blocks = []
     curr_block = None
     preserved_count = 0
@@ -164,7 +165,9 @@ def process_audio_file(
             if curr_block is None:
                 curr_block = {'start_sec': seg['start_sec'], 'end_sec': seg['end_sec']}
             else:
-                if seg['start_sec'] - curr_block['end_sec'] <= 0.3:
+                block_dur = seg['end_sec'] - curr_block['start_sec']
+                gap = seg['start_sec'] - curr_block['end_sec']
+                if gap <= 0.3 and block_dur <= MAX_BLOCK_DURATION_SEC:
                     curr_block['end_sec'] = seg['end_sec']
                 else:
                     merged_blocks.append(curr_block)
@@ -181,55 +184,55 @@ def process_audio_file(
     print(f"      - Pre-Recorded Target Voice Preserved: {preserved_count} segments")
     print(f"      - Non-Target Voices Gender Converted: {len(merged_blocks)} blocks")
 
-    print("[3/4] Transforming gender across continuous speech blocks...")
-    tot_blocks = len(merged_blocks)
-    for i, b in enumerate(tqdm(merged_blocks, desc="Transforming Blocks")):
-        _report_progress(35.0 + ((i + 1) / max(1, tot_blocks)) * 55.0, f"Transforming speech blocks ({i+1}/{tot_blocks})...")
-        start_sample = int(b['start_sec'] * sr)
-        end_sample = int(b['end_sec'] * sr)
-        block_audio = full_y[start_sample:end_sample]
-        
-        seg_wav_in = os.path.join(temp_dir, f"block_{i}_in.wav")
-        seg_wav_out = os.path.join(temp_dir, f"block_{i}_out.wav")
-        
-        sf.write(seg_wav_in, block_audio, sr)
-        success = convert_gender_auto(seg_wav_in, seg_wav_out, target_gender=target_gender)
-        
-        if success and os.path.exists(seg_wav_out):
-            trans_y, trans_sr = sf.read(seg_wav_out)
-            
-            # Smooth 5ms edge crossfade to eliminate boundary clicks
-            fade_len = int(0.005 * sr)
-            if len(trans_y) > fade_len * 2:
-                fade_in = np.linspace(0, 1, fade_len)
-                fade_out = np.linspace(1, 0, fade_len)
-                trans_y[:fade_len] *= fade_in
-                trans_y[-fade_len:] *= fade_out
-                
-            target_len = end_sample - start_sample
-            if len(trans_y) == target_len:
-                out_audio[start_sample:end_sample] = trans_y
-            elif len(trans_y) > target_len:
-                out_audio[start_sample:end_sample] = trans_y[:target_len]
-            else:
-                out_audio[start_sample : start_sample + len(trans_y)] = trans_y
-                
-    print("[4/4] Exporting final converted audio track...")
-    _report_progress(95.0, "Exporting final converted MP3 audio...")
-    temp_full_wav = os.path.join(temp_dir, "final_output.wav")
-    sf.write(temp_full_wav, out_audio, sr)
-    
-    # Export to mp3
-    audio = AudioSegment.from_wav(temp_full_wav)
-    audio.export(output_file, format="mp3", bitrate="192k")
-    _report_progress(100.0, "Completed")
-    
-    # Cleanup temp files
     try:
-        for f in glob.glob(os.path.join(temp_dir, "*")):
-            os.remove(f)
-        os.rmdir(temp_dir)
-    except Exception:
-        pass
+        print("[3/4] Transforming gender across continuous speech blocks...")
+        tot_blocks = len(merged_blocks)
+        for i, b in enumerate(tqdm(merged_blocks, desc="Transforming Blocks")):
+            _report_progress(35.0 + ((i + 1) / max(1, tot_blocks)) * 55.0, f"Transforming speech blocks ({i+1}/{tot_blocks})...")
+            start_sample = int(b['start_sec'] * sr)
+            end_sample = int(b['end_sec'] * sr)
+            block_audio = full_y[start_sample:end_sample]
+            
+            seg_wav_in = os.path.join(temp_dir, f"block_{i}_in.wav")
+            seg_wav_out = os.path.join(temp_dir, f"block_{i}_out.wav")
+            
+            sf.write(seg_wav_in, block_audio, sr)
+            success = convert_gender_auto(seg_wav_in, seg_wav_out, target_gender=target_gender)
+            
+            if success and os.path.exists(seg_wav_out):
+                trans_y, trans_sr = sf.read(seg_wav_out)
+                
+                # Smooth 5ms edge crossfade to eliminate boundary clicks
+                fade_len = int(0.005 * sr)
+                if len(trans_y) > fade_len * 2:
+                    fade_in = np.linspace(0, 1, fade_len)
+                    fade_out = np.linspace(1, 0, fade_len)
+                    trans_y[:fade_len] *= fade_in
+                    trans_y[-fade_len:] *= fade_out
+                    
+                target_len = end_sample - start_sample
+                if len(trans_y) == target_len:
+                    out_audio[start_sample:end_sample] = trans_y
+                elif len(trans_y) > target_len:
+                    out_audio[start_sample:end_sample] = trans_y[:target_len]
+                else:
+                    out_audio[start_sample : start_sample + len(trans_y)] = trans_y
+                    
+        print("[4/4] Exporting final converted audio track...")
+        _report_progress(95.0, "Exporting final converted MP3 audio...")
+        temp_full_wav = os.path.join(temp_dir, "final_output.wav")
+        sf.write(temp_full_wav, out_audio, sr)
         
-    print(f"[✓] Successfully generated output: {output_file}")
+        # Export to mp3
+        audio = AudioSegment.from_wav(temp_full_wav)
+        audio.export(output_file, format="mp3", bitrate="192k")
+        _report_progress(100.0, "Completed")
+        print(f"[✓] Successfully generated output: {output_file}")
+    finally:
+        # Guaranteed cleanup of temp files
+        try:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+

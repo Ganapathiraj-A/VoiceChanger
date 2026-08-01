@@ -47,6 +47,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --region "$REGION" \
     --memory 4Gi \
     --cpu 2 \
+    --no-cpu-throttling \
     --timeout 900s \
     --allow-unauthenticated \
     --project "$PROJECT_ID"

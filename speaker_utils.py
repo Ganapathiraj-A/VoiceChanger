@@ -68,7 +68,7 @@ def extract_embedding(audio_data, sr=16000):
 
 def extract_embeddings_batch(audio_segments_list, sr=16000):
     """
-    Ultra-fast batch extraction of 192d speaker embeddings using a single tensor batch pass.
+    Ultra-fast batch extraction of 192d speaker embeddings using mini-batched PyTorch passes.
     """
     encoder = get_speaker_encoder()
     if encoder is not None and len(audio_segments_list) > 0:
@@ -80,11 +80,18 @@ def extract_embeddings_batch(audio_segments_list, sr=16000):
                 if len(a) < target_len:
                     a = np.pad(a, (0, target_len - len(a)))
                 tensors.append(torch.tensor(a, dtype=torch.float32))
-            batch_tensor = torch.stack(tensors)
-            with torch.no_grad():
-                emb = encoder.encode_batch(batch_tensor)
-                emb = emb.squeeze(1).cpu().numpy()
-            return emb
+            
+            all_embs = []
+            batch_size = 16
+            for i in range(0, len(tensors), batch_size):
+                sub_batch = torch.stack(tensors[i:i + batch_size])
+                with torch.no_grad():
+                    emb = encoder.encode_batch(sub_batch)
+                    emb = emb.squeeze(1).cpu().numpy()
+                    if len(emb.shape) == 1:
+                        emb = np.expand_dims(emb, axis=0)
+                    all_embs.append(emb)
+            return np.vstack(all_embs)
         except Exception as e:
             print(f"[SpeakerUtils] Batch extraction exception: {e}")
             
@@ -97,6 +104,10 @@ def cosine_similarity(emb1, emb2):
     """
     if emb1 is None or emb2 is None or len(emb1) == 0 or len(emb2) == 0:
         return 0.0
+    if len(emb1) != len(emb2):
+        min_dim = min(len(emb1), len(emb2))
+        emb1 = emb1[:min_dim]
+        emb2 = emb2[:min_dim]
     norm1 = np.linalg.norm(emb1)
     norm2 = np.linalg.norm(emb2)
     if norm1 == 0 or norm2 == 0:

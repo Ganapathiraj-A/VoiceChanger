@@ -90,7 +90,7 @@ i+fozqmCTkpHUig37W5sLesojw==
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(300, TimeUnit.SECONDS)
         .build()
 
@@ -375,7 +375,7 @@ i+fozqmCTkpHUig37W5sLesojw==
                 val pct = json.optDouble("progress_percent", 0.0).toFloat()
                 val eta = json.optDouble("eta_seconds", 30.0).toFloat()
                 val elapsed = json.optDouble("elapsed_seconds", 0.0).toFloat()
-                val msg = json.optString("status_msg", "Processing audio...")
+                val msg = if (json.has("status_msg")) json.optString("status_msg", "Processing audio...") else json.optString("step", "Processing audio...")
                 val filename = if (json.has("filename") && !json.isNull("filename")) json.getString("filename") else null
 
                 LogManager.d(context, "POLL", "Status=$status, Pct=${pct}%, ETA=${eta}s, Msg=$msg")

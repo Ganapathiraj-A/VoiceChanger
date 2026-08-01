@@ -339,12 +339,14 @@ fun VoiceChangerScreen() {
             submitResult.onSuccess { jobId ->
                 statusMessage = "Job created! Processing on Cloud..."
                 var isCompleted = false
+                var pollErrorCount = 0
 
                 while (!isCompleted && isProcessing) {
                     delay(1500)
                     val statusResult = CloudApiClient.pollJobStatus(context, jobId)
                     refreshLogs()
                     statusResult.onSuccess { resp ->
+                        pollErrorCount = 0
                         progressPercent = resp.progressPercent
                         etaSeconds = resp.etaSeconds
                         elapsedSeconds = resp.elapsedSeconds
@@ -374,6 +376,13 @@ fun VoiceChangerScreen() {
                             isCompleted = true
                             isProcessing = false
                             errorMessage = "Cloud job failed: ${resp.statusMsg}"
+                        }
+                    }.onFailure { err ->
+                        pollErrorCount++
+                        if (pollErrorCount >= 10) {
+                            isCompleted = true
+                            isProcessing = false
+                            errorMessage = "Job status polling failed after 10 retries: ${err.message}"
                         }
                     }
                 }
