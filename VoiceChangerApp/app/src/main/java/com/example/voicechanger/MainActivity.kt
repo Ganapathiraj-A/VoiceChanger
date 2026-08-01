@@ -468,29 +468,6 @@ fun VoiceChangerScreen() {
                                 fontWeight = FontWeight.Medium
                             )
 
-                            val isInputPlaying = currentlyPlayingKey == "INPUT_${selectedFileUri}" && activeMediaPlayer?.isPlaying == true
-                            Button(
-                                onClick = {
-                                    toggleAudioPlayback("INPUT_${selectedFileUri}") {
-                                        createMediaPlayerFromUri(selectedFileUri!!)
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(42.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isInputPlaying) Color(0xFFE53935) else Color(0xFF1976D2)
-                                )
-                            ) {
-                                Text(
-                                    if (isInputPlaying) "⏸ Pause Input Audio" else "▶ Play Input Audio",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-
                             // Convert Voice via Cloud Button placed right below Choose Audio
                             Button(
                                 onClick = { startCloudProcessing() },
@@ -549,6 +526,30 @@ fun VoiceChangerScreen() {
 
                     AnimatedVisibility(visible = showAdvancedOptions) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (selectedFileUri != null) {
+                                val isInputPlaying = currentlyPlayingKey == "INPUT_${selectedFileUri}" && activeMediaPlayer?.isPlaying == true
+                                Button(
+                                    onClick = {
+                                        toggleAudioPlayback("INPUT_${selectedFileUri}") {
+                                            createMediaPlayerFromUri(selectedFileUri!!)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(42.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isInputPlaying) Color(0xFFE53935) else Color(0xFF1976D2)
+                                    )
+                                ) {
+                                    Text(
+                                        if (isInputPlaying) "⏸ Pause Input Audio" else "▶ Play Selected Input Audio",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
                             if (isAnalyzingPreview) {
                                 Card(
                                     modifier = Modifier
