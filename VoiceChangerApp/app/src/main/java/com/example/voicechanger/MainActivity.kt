@@ -199,13 +199,32 @@ fun VoiceChangerScreen() {
 
     fun refreshHistory() {
         historyFiles.clear()
-        val appMusicDir = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "VoiceChanger")
-        if (appMusicDir.exists()) {
-            val files = appMusicDir.listFiles { file -> file.isFile && file.name.endsWith(".mp3", ignoreCase = true) }
-            if (files != null) {
-                historyFiles.addAll(files.sortedByDescending { it.lastModified() })
+        val allFiles = mutableListOf<File>()
+
+        val candidateDirs = listOf(
+            File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "VoiceChanger"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "VoiceChanger"),
+            File(Environment.getExternalStorageDirectory(), "Music/VoiceChanger"),
+            File(context.filesDir, "VoiceChanger"),
+            File(context.cacheDir, "VoiceChanger")
+        )
+
+        for (dir in candidateDirs) {
+            if (dir.exists() && dir.isDirectory) {
+                val files = dir.listFiles { file ->
+                    file.isFile && (file.name.endsWith(".mp3", true) || file.name.endsWith(".wav", true) || file.name.endsWith(".m4a", true) || file.name.endsWith(".aac", true) || file.name.endsWith(".3gp", true))
+                }
+                if (files != null) {
+                    allFiles.addAll(files)
+                }
             }
         }
+
+        val sortedUnique = allFiles
+            .distinctBy { it.name }
+            .sortedByDescending { it.lastModified() }
+
+        historyFiles.addAll(sortedUnique)
     }
 
     val prefs = remember { context.getSharedPreferences("voice_changer_settings", Context.MODE_PRIVATE) }
