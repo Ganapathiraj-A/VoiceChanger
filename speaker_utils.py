@@ -66,6 +66,31 @@ def extract_embedding(audio_data, sr=16000):
     return stats
 
 
+def extract_embeddings_batch(audio_segments_list, sr=16000):
+    """
+    Ultra-fast batch extraction of 192d speaker embeddings using a single tensor batch pass.
+    """
+    encoder = get_speaker_encoder()
+    if encoder is not None and len(audio_segments_list) > 0:
+        try:
+            target_len = int(2.0 * sr)
+            tensors = []
+            for seg in audio_segments_list:
+                a = seg[:target_len]
+                if len(a) < target_len:
+                    a = np.pad(a, (0, target_len - len(a)))
+                tensors.append(torch.tensor(a, dtype=torch.float32))
+            batch_tensor = torch.stack(tensors)
+            with torch.no_grad():
+                emb = encoder.encode_batch(batch_tensor)
+                emb = emb.squeeze(1).cpu().numpy()
+            return emb
+        except Exception as e:
+            print(f"[SpeakerUtils] Batch extraction exception: {e}")
+            
+    return np.array([extract_embedding(s[:int(2.0 * sr)], sr=sr) for s in audio_segments_list])
+
+
 def cosine_similarity(emb1, emb2):
     """
     Computes cosine similarity between two embedding vectors (-1.0 to +1.0).

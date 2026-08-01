@@ -95,14 +95,12 @@ def process_audio_file(
             })
     else:
         print(f"[!] Pre-recorded target voice profile detected. Preserving target voice & converting remaining speakers.")
-        # 1. Extract SpeechBrain ECAPA-TDNN embedding for every valid segment
-        segment_embeddings = []
-        for seg in valid_segments:
-            seg_audio = seg['audio_data']
-            seg_emb = extract_embedding(seg_audio[:int(2.0 * sr)], sr=sr)
-            segment_embeddings.append(seg_emb)
-            
-        embeddings_arr = np.array(segment_embeddings)
+        # 1. Extract SpeechBrain ECAPA-TDNN embedding in 1 fast batch
+        from speaker_utils import extract_embeddings_batch
+        _report_progress(20.0, f"Extracting embeddings for {len(valid_segments)} segments in batch...")
+        audio_list = [seg['audio_data'] for seg in valid_segments]
+        embeddings_arr = extract_embeddings_batch(audio_list, sr=sr)
+        _report_progress(35.0, "Classifying speaker clusters...")
         sims_arr = np.array([cosine_similarity(emb, target_embedding) for emb in embeddings_arr])
         durations = np.array([seg['end_sec'] - seg['start_sec'] for seg in valid_segments])
         total_speech_dur = np.sum(durations)

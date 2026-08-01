@@ -81,12 +81,13 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 now = time.time()
                 elapsed = now - JOBS_DB[job_id]["created_at"]
                 
-                # Calculate ETA
+                # Calculate ETA (capped at max 120s for realistic estimates)
                 if pct > 5.0:
                     total_est = elapsed / (pct / 100.0)
-                    eta = max(0.0, round(total_est - elapsed, 1))
+                    raw_eta = max(0.0, round(total_est - elapsed, 1))
+                    eta = min(120.0, raw_eta)
                 else:
-                    eta = 30.0
+                    eta = 20.0
                     
                 JOBS_DB[job_id]["progress_percent"] = round(pct, 1)
                 JOBS_DB[job_id]["step"] = step_msg
