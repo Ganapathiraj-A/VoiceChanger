@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
@@ -1300,6 +1301,102 @@ fun VoiceChangerScreen() {
                                     Text("📁 Select Call Recording Folder", color = Color.White, fontSize = 12.sp)
                                 }
                                 Text("Automatically selects the newest recording from this folder when app opens after call.", fontSize = 11.sp, color = Color.LightGray)
+                            }
+                        }
+
+                        // Option 3: App Version & GitHub Update Checker
+                        val (versionName, versionCode) = remember {
+                            try {
+                                val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                                val vCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pInfo.longVersionCode else pInfo.versionCode.toLong()
+                                Pair(pInfo.versionName ?: "1.1.0", vCode)
+                            } catch (_: Exception) {
+                                Pair("1.1.0", 11L)
+                            }
+                        }
+
+                        var isCheckingUpdate by remember { mutableStateOf(false) }
+                        var releaseInfoState by remember { mutableStateOf<GitHubReleaseInfo?>(null) }
+                        var updateCheckError by remember { mutableStateOf<String?>(null) }
+
+                        fun checkAppUpdate() {
+                            coroutineScope.launch {
+                                isCheckingUpdate = true
+                                updateCheckError = null
+                                val res = CloudApiClient.checkLatestReleaseInfo(context)
+                                isCheckingUpdate = false
+                                res.onSuccess { info ->
+                                    releaseInfoState = info
+                                }.onFailure { err ->
+                                    updateCheckError = "Check failed: ${err.message ?: "Network error"}"
+                                }
+                            }
+                        }
+
+                        LaunchedEffect(Unit) {
+                            checkAppUpdate()
+                        }
+
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("App Version Information", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                        Text("v$versionName (Build $versionCode)", fontSize = 12.sp, color = Color(0xFF1DB954))
+                                    }
+                                    if (isCheckingUpdate) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF1DB954), strokeWidth = 2.dp)
+                                    } else {
+                                        IconButton(onClick = { checkAppUpdate() }) {
+                                            Text("🔄", fontSize = 14.sp)
+                                        }
+                                    }
+                                }
+
+                                if (releaseInfoState != null) {
+                                    val info = releaseInfoState!!
+                                    val dateStr = if (info.publishedEpochMs > 0) {
+                                        SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(info.publishedEpochMs))
+                                    } else info.publishedAt
+
+                                    if (info.isUpdateAvailable) {
+                                        Text("✨ New update available on GitHub!", fontWeight = FontWeight.Bold, color = Color(0xFF25D366), fontSize = 12.sp)
+                                        Text("GitHub Released: $dateStr", fontSize = 11.sp, color = Color.LightGray)
+                                    } else {
+                                        Text("✅ App is up-to-date (Latest Release: $dateStr)", fontSize = 11.sp, color = Color.LightGray)
+                                    }
+                                } else if (updateCheckError != null) {
+                                    Text(updateCheckError!!, fontSize = 11.sp, color = Color(0xFFFF6B6B))
+                                }
+
+                                Button(
+                                    onClick = {
+                                        val url = releaseInfoState?.htmlUrl ?: "https://github.com/Ganapathiraj-A/VoiceChanger/releases/tag/latest"
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        context.startActivity(intent)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(40.dp),
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (releaseInfoState?.isUpdateAvailable == true) Color(0xFF1DB954) else Color(0xFF333333)
+                                    )
+                                ) {
+                                    Text(
+                                        if (releaseInfoState?.isUpdateAvailable == true) "📥 Download New Update from GitHub" else "🌐 View GitHub Latest Release",
+                                        color = if (releaseInfoState?.isUpdateAvailable == true) Color.Black else Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }

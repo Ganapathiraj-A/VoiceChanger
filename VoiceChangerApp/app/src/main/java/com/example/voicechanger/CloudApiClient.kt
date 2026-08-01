@@ -483,4 +483,64 @@ i+fozqmCTkpHUig37W5sLesojw==
         }
         return name
     }
+
+    suspend fun checkLatestReleaseInfo(context: Context): Result<GitHubReleaseInfo> = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder()
+                .url("https://api.github.com/repos/Ganapathiraj-A/VoiceChanger/releases/tags/latest")
+                .header("User-Agent", "VoiceChanger-Android-App")
+                .get()
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                val bodyStr = resp.body?.string() ?: ""
+                if (resp.isSuccessful && bodyStr.isNotEmpty()) {
+                    val json = JSONObject(bodyStr)
+                    val publishedAt = json.optString("published_at", "")
+                    val htmlUrl = json.optString("html_url", "https://github.com/Ganapathiraj-A/VoiceChanger/releases/tag/latest")
+                    val body = json.optString("body", "")
+
+                    var publishedEpochMs = 0L
+                    if (publishedAt.isNotEmpty()) {
+                        try {
+                            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                            publishedEpochMs = sdf.parse(publishedAt)?.time ?: 0L
+                        } catch (_: Exception) {}
+                    }
+
+                    val appInstallTime = try {
+                        val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                        pInfo.lastUpdateTime
+                    } catch (_: Exception) {
+                        0L
+                    }
+
+                    val isUpdateAvailable = (publishedEpochMs > 0 && publishedEpochMs > appInstallTime + 120_000)
+
+                    Result.success(
+                        GitHubReleaseInfo(
+                            publishedAt = publishedAt,
+                            publishedEpochMs = publishedEpochMs,
+                            isUpdateAvailable = isUpdateAvailable,
+                            releaseNotes = body,
+                            htmlUrl = htmlUrl
+                        )
+                    )
+                } else {
+                    Result.failure(Exception("GitHub API returned HTTP ${resp.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+
+data class GitHubReleaseInfo(
+    val publishedAt: String,
+    val publishedEpochMs: Long,
+    val isUpdateAvailable: Boolean,
+    val releaseNotes: String?,
+    val htmlUrl: String
+)
