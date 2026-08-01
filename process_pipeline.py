@@ -14,7 +14,7 @@ from speaker_utils import (
     cosine_similarity,
     suppress_background_noise
 )
-from voice_converter import convert_gender_auto
+from voice_converter import convert_gender_auto, convert_voice_adaptive_target
 
 torch.set_num_threads(2)
 
@@ -26,6 +26,7 @@ def process_audio_file(
     preserve_speaker_cluster: int = None,
     similarity_threshold: float = 0.50,
     target_gender: str = "female",
+    conversion_mode: str = "praat_psola",
     progress_callback = None
 ):
     """
@@ -200,7 +201,10 @@ def process_audio_file(
             seg_wav_out = os.path.join(temp_dir, f"block_{i}_out.wav")
             
             sf.write(seg_wav_in, block_audio, sr)
-            success = convert_gender_auto(seg_wav_in, seg_wav_out, target_gender=target_gender)
+            if conversion_mode == "target_morph":
+                success = convert_voice_adaptive_target(seg_wav_in, seg_wav_out, target_profile_name=target_profile_name, target_gender=target_gender)
+            else:
+                success = convert_gender_auto(seg_wav_in, seg_wav_out, target_gender=target_gender)
             
             if success and os.path.exists(seg_wav_out):
                 trans_y, trans_sr = sf.read(seg_wav_out)

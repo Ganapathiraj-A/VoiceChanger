@@ -296,11 +296,17 @@ i+fozqmCTkpHUig37W5sLesojw==
         }
     }
 
-    suspend fun submitJob(context: Context, fileUri: Uri, preserveSpeakerCluster: Int? = null): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun submitJob(
+        context: Context,
+        fileUri: Uri,
+        preserveSpeakerCluster: Int? = null,
+        conversionMode: String = "praat_psola",
+        targetProfileName: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val idToken = getGcpIdToken(context)
             val fileName = getFileName(context, fileUri) ?: "input_audio.mp3"
-            LogManager.i(context, "JOB", "Submitting file: $fileName (URI: $fileUri, preserve_cluster: $preserveSpeakerCluster)")
+            LogManager.i(context, "JOB", "Submitting file: $fileName (URI: $fileUri, preserve_cluster: $preserveSpeakerCluster, mode: $conversionMode, profile: $targetProfileName)")
 
             val bytes: ByteArray = try {
                 readBytesFromUri(context, fileUri)
@@ -321,9 +327,14 @@ i+fozqmCTkpHUig37W5sLesojw==
                     fileName,
                     bytes.toRequestBody(mediaType)
                 )
+                .addFormDataPart("conversion_mode", conversionMode)
 
             if (preserveSpeakerCluster != null) {
                 builder.addFormDataPart("preserve_speaker_cluster", preserveSpeakerCluster.toString())
+            }
+
+            if (!targetProfileName.isNullOrBlank()) {
+                builder.addFormDataPart("target_profile_name", targetProfileName)
             }
 
             val requestBody = builder.build()

@@ -215,6 +215,8 @@ fun VoiceChangerScreen() {
     var isAnalyzingPreview by remember { mutableStateOf(false) }
     var previewData by remember { mutableStateOf<DiarizePreviewResponse?>(null) }
     var selectedPreserveCluster by remember { mutableStateOf(0) }
+    var conversionMode by remember { mutableStateOf("praat_psola") }
+    var selectedTargetProfile by remember { mutableStateOf("tamil_female") }
 
     var previewProgressPercent by remember { mutableStateOf(0f) }
     var previewEtaSeconds by remember { mutableStateOf(3f) }
@@ -334,7 +336,13 @@ fun VoiceChangerScreen() {
         refreshLogs()
 
         coroutineScope.launch {
-            val submitResult = CloudApiClient.submitJob(context, uri, preserveSpeakerCluster = selectedPreserveCluster)
+            val submitResult = CloudApiClient.submitJob(
+                context,
+                uri,
+                preserveSpeakerCluster = selectedPreserveCluster,
+                conversionMode = conversionMode,
+                targetProfileName = if (conversionMode == "target_morph") selectedTargetProfile else null
+            )
             refreshLogs()
             submitResult.onSuccess { jobId ->
                 statusMessage = "Job created! Processing on Cloud..."
@@ -637,6 +645,109 @@ fun VoiceChangerScreen() {
                                                 }
                                             ) {
                                                 Text(if (isPlayingB) "⏸" else "▶", fontSize = 20.sp, color = Color.White)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Conversion Engine Mode Selection Card
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "Conversion Engine Mode:",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = Color.White
+                                    )
+
+                                    // Mode 1: Praat PSOLA
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (conversionMode == "praat_psola") Color(0xFF1DB954).copy(alpha = 0.2f) else Color(0xFF2A2A2A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = (conversionMode == "praat_psola"),
+                                                onClick = { conversionMode = "praat_psola" },
+                                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                            )
+                                            Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                Text("⚡ Praat Pitch & Formant Shift", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                                Text("Fast, crisp pitch & vocal tract transform", color = Color.LightGray, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+
+                                    // Mode 2: Adaptive Target Voice Morphing
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (conversionMode == "target_morph") Color(0xFF1DB954).copy(alpha = 0.2f) else Color(0xFF2A2A2A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = (conversionMode == "target_morph"),
+                                                onClick = { conversionMode = "target_morph" },
+                                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                            )
+                                            Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                Text("🎭 Adaptive Target Voice Morphing", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                                Text("Morphs pitch & formants to match chosen profile", color = Color.LightGray, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+
+                                    if (conversionMode == "target_morph") {
+                                        Text(
+                                            "Target Voice Profile to Morph Into:",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFFFFA726),
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            listOf(
+                                                "tamil_female" to "Tamil Female",
+                                                "tamil_male" to "Tamil Male",
+                                                "english_female" to "English Female",
+                                                "english_male" to "English Male"
+                                            ).forEach { (id, label) ->
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    RadioButton(
+                                                        selected = (selectedTargetProfile == id),
+                                                        onClick = { selectedTargetProfile = id },
+                                                        colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                                    )
+                                                    Text(label, color = Color.White, fontSize = 13.sp)
+                                                }
                                             }
                                         }
                                     }

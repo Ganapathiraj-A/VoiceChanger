@@ -111,3 +111,48 @@ def convert_gender_auto(audio_path, output_path, target_gender="auto"):
         pitch_semitones=pitch_semitones,
         formant_ratio=formant_ratio
     )
+
+
+def convert_voice_adaptive_target(audio_path, output_path, target_profile_name=None, target_gender="auto"):
+    """
+    Adaptive Target Voice Morphing:
+    Dynamically measures target profile pitch (F0) and acoustic properties from target_profiles/{name}.mp3
+    and morphs input vocal blocks to match the target profile's pitch & formant characteristics.
+    """
+    target_pitch = None
+    if target_profile_name:
+        prof_audio = os.path.join("target_profiles", f"{target_profile_name}.mp3")
+        if os.path.exists(prof_audio):
+            target_pitch = detect_average_pitch(prof_audio)
+
+    if target_pitch is None or target_pitch <= 0:
+        if target_profile_name and "female" in target_profile_name.lower():
+            target_pitch = 220.0
+        elif target_profile_name and "male" in target_profile_name.lower():
+            target_pitch = 120.0
+        else:
+            target_pitch = 210.0 if target_gender.lower() in ["female", "f"] else 125.0
+
+    input_pitch = detect_average_pitch(audio_path)
+    
+    # Calculate exact dynamic semitone shift to reach target profile pitch
+    if input_pitch > 0 and target_pitch > 0:
+        ratio = target_pitch / input_pitch
+        pitch_semitones = float(12.0 * np.log2(ratio))
+        # Cap semitones to realistic range (-12 to +12 semitones)
+        pitch_semitones = max(-12.0, min(12.0, pitch_semitones))
+        formant_ratio = float(np.sqrt(ratio))
+        formant_ratio = max(0.80, min(1.25, formant_ratio))
+    else:
+        pitch_semitones = 6.0
+        formant_ratio = 1.15
+
+    print(f"[VoiceConverter] Adaptive Target Morphing -> Profile: {target_profile_name} (Target F0: {target_pitch:.1f}Hz) | Input F0: {input_pitch:.1f}Hz | Semitones: {pitch_semitones:+.1f} | Formant Ratio: {formant_ratio:.2f}")
+
+    return convert_voice_praat_psola(
+        audio_path,
+        output_path,
+        pitch_semitones=pitch_semitones,
+        formant_ratio=formant_ratio
+    )
+

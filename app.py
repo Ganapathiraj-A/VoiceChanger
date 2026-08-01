@@ -66,7 +66,7 @@ def health_check():
 # ASYNC JOB MANAGEMENT ENDPOINTS (PROGRESS & ETA)
 # ---------------------------------------------------------
 
-def run_job_background(job_id: str, input_path: str, output_path: str, threshold: float, target_gender: str, target_profile_name: str, preserve_speaker_cluster: int, is_comparison: bool):
+def run_job_background(job_id: str, input_path: str, output_path: str, threshold: float, target_gender: str, target_profile_name: str, preserve_speaker_cluster: int, is_comparison: bool, conversion_mode: str = "praat_psola"):
     target_embedding = None
     if target_profile_name:
         prof_path = os.path.join("target_profiles", f"{target_profile_name}.npy")
@@ -107,6 +107,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 preserve_speaker_cluster=preserve_speaker_cluster,
                 similarity_threshold=threshold,
                 target_gender=target_gender,
+                conversion_mode=conversion_mode,
                 progress_callback=on_progress
             )
             create_comparison_file(input_path, output_path, comp_out_path)
@@ -120,6 +121,7 @@ def run_job_background(job_id: str, input_path: str, output_path: str, threshold
                 preserve_speaker_cluster=preserve_speaker_cluster,
                 similarity_threshold=threshold,
                 target_gender=target_gender,
+                conversion_mode=conversion_mode,
                 progress_callback=on_progress
             )
             output_final = output_path
@@ -298,7 +300,8 @@ async def submit_job(
     target_gender: str = Form("auto"),
     target_profile_name: str = Form(None),
     preserve_speaker_cluster: int = Form(None),
-    is_comparison: bool = Form(False)
+    is_comparison: bool = Form(False),
+    conversion_mode: str = Form("praat_psola")
 ):
     """
     Submits an audio conversion job for background processing.
@@ -335,7 +338,7 @@ async def submit_job(
     # Launch processing in dedicated background thread so main Uvicorn event loop stays 100% responsive
     worker_thread = threading.Thread(
         target=run_job_background,
-        args=(job_id, temp_in_path, temp_out_path, threshold, target_gender, target_profile_name, preserve_speaker_cluster, is_comparison),
+        args=(job_id, temp_in_path, temp_out_path, threshold, target_gender, target_profile_name, preserve_speaker_cluster, is_comparison, conversion_mode),
         daemon=True
     )
     worker_thread.start()
