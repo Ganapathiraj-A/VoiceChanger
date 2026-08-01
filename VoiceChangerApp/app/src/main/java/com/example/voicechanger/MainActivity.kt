@@ -468,64 +468,65 @@ fun VoiceChangerScreen() {
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
-                                if (isAnalyzingPreview) {
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 8.dp),
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-                                        shape = RoundedCornerShape(10.dp)
+                            }
+
+                            if (isAnalyzingPreview) {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Column(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    "🔍 Analyzing Speakers...",
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp,
-                                                    color = Color.White
-                                                )
-                                                Text(
-                                                    "${previewProgressPercent.toInt()}%",
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp,
-                                                    color = Color(0xFF1DB954)
-                                                )
-                                            }
-
-                                            LinearProgressIndicator(
-                                                progress = { (previewProgressPercent / 100f).coerceIn(0f, 1f) },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(8.dp),
-                                                color = Color(0xFF1DB954),
-                                                trackColor = Color(0xFF333333)
+                                            Text(
+                                                "🔍 Analyzing Speakers...",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Color.White
                                             )
+                                            Text(
+                                                "${previewProgressPercent.toInt()}%",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Color(0xFF1DB954)
+                                            )
+                                        }
 
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    previewStepMessage,
-                                                    fontSize = 12.sp,
-                                                    color = Color.Gray,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                Text(
-                                                    "⏱ ${previewElapsedSeconds.toInt()}s (ETA: ${previewEtaSeconds.toInt()}s)",
-                                                    fontSize = 12.sp,
-                                                    color = Color(0xFFFFA726),
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                            }
+                                        LinearProgressIndicator(
+                                            progress = { (previewProgressPercent / 100f).coerceIn(0f, 1f) },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(8.dp),
+                                            color = Color(0xFF1DB954),
+                                            trackColor = Color(0xFF333333)
+                                        )
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                previewStepMessage,
+                                                fontSize = 12.sp,
+                                                color = Color.Gray,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                "⏱ ${previewElapsedSeconds.toInt()}s (ETA: ${previewEtaSeconds.toInt()}s)",
+                                                fontSize = 12.sp,
+                                                color = Color(0xFFFFA726),
+                                                fontWeight = FontWeight.Medium
+                                            )
                                         }
                                     }
                                 }
