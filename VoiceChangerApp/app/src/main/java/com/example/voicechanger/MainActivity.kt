@@ -383,10 +383,6 @@ fun VoiceChangerScreen() {
         refreshLogs()
         scanAndSelectLatestCallRecording()
 
-        selectedFileUri?.let { uri ->
-            triggerSpeakerPreview(uri)
-        }
-
         val isPostCall = (context as? ComponentActivity)?.intent?.getBooleanExtra("AUTO_SELECT_LATEST_CALL", false) == true
         if (isPostCall) {
             isAutoCloseActive = true
