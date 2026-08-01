@@ -308,10 +308,34 @@ fun VoiceChangerScreen() {
         }
     }
 
+    var isAutoCloseActive by remember { mutableStateOf(false) }
+    var autoCloseRemainingSec by remember { mutableStateOf(0) }
+
+    fun cancelAutoClose() {
+        if (isAutoCloseActive) {
+            isAutoCloseActive = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         refreshHistory()
         refreshLogs()
         scanAndSelectLatestCallRecording()
+
+        val isPostCall = (context as? ComponentActivity)?.intent?.getBooleanExtra("AUTO_SELECT_LATEST_CALL", false) == true
+        if (isPostCall) {
+            isAutoCloseActive = true
+            autoCloseRemainingSec = 7
+            while (autoCloseRemainingSec > 0 && isAutoCloseActive) {
+                delay(1000)
+                autoCloseRemainingSec--
+            }
+            if (autoCloseRemainingSec <= 0 && isAutoCloseActive) {
+                LogManager.i(context, "AUTO", "7s Auto-close timer expired without user response. Closing app.")
+                (context as? ComponentActivity)?.finish()
+            }
+        }
+
         LogManager.i(context, "APP", "VoiceChanger App Launched.")
     }
 
@@ -519,6 +543,33 @@ fun VoiceChangerScreen() {
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
+                },
+                actions = {
+                    if (isAutoCloseActive && autoCloseRemainingSec > 0) {
+                        Button(
+                            onClick = {
+                                (context as? ComponentActivity)?.finish()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Text(
+                                "❌ Close (${autoCloseRemainingSec}s)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        IconButton(
+                            onClick = {
+                                (context as? ComponentActivity)?.finish()
+                            }
+                        ) {
+                            Text("❌", fontSize = 16.sp)
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF1E1E1E)
