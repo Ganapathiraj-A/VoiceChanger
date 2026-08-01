@@ -216,23 +216,24 @@ def generate_speaker_previews(audio_path: str, output_dir: str):
     if len(valid_segs) == 0:
         valid_segs = segments
         
-    durations = np.array([s['end_sec'] - s['start_sec'] for s in valid_segs])
+    preview_segs = valid_segs[:40] if len(valid_segs) > 40 else valid_segs
+    durations = np.array([s['end_sec'] - s['start_sec'] for s in preview_segs])
     total_dur = np.sum(durations)
     
-    embeddings = np.array([extract_embedding(s['audio_data'][:int(2.0*sr)], sr=sr) for s in valid_segs])
+    embeddings = np.array([extract_embedding(s['audio_data'][:int(2.0*sr)], sr=sr) for s in preview_segs])
     
     from sklearn.cluster import KMeans
-    n_clusters = min(2, len(valid_segs))
+    n_clusters = min(2, len(preview_segs))
     if n_clusters >= 2:
         km = KMeans(n_clusters=2, random_state=42, n_init=20).fit(embeddings)
         cluster_labels = km.labels_
     else:
-        cluster_labels = np.zeros(len(valid_segs), dtype=int)
+        cluster_labels = np.zeros(len(preview_segs), dtype=int)
 
     spk_audio = {0: [], 1: []}
     spk_durs = {0: 0.0, 1: 0.0}
     
-    for i, seg in enumerate(valid_segs):
+    for i, seg in enumerate(preview_segs):
         cid = cluster_labels[i]
         spk_durs[cid] += (seg['end_sec'] - seg['start_sec'])
         if (len(spk_audio[cid]) * (1.0 / sr)) < 6.0:  # Max 6s sample clip

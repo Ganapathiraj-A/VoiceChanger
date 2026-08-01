@@ -231,19 +231,26 @@ fun VoiceChangerScreen() {
             LogManager.i(context, "UI", "Selected file: $selectedFileName ($uri)")
             refreshLogs()
 
-            coroutineScope.launch {
-                isAnalyzingPreview = true
-                val res = CloudApiClient.fetchDiarizePreview(context, uri)
-                isAnalyzingPreview = false
-                res.onSuccess { data ->
-                    previewData = data
-                    selectedPreserveCluster = 0
-                    statusMessage = "Speakers analyzed! Play sample audio for Speaker A & Speaker B to choose which voice to preserve."
-                }.onFailure { err ->
-                    statusMessage = "File selected. Tap 'Convert Voice via Cloud'."
+            fun triggerSpeakerPreview(u: Uri) {
+                coroutineScope.launch {
+                    isAnalyzingPreview = true
+                    errorMessage = null
+                    statusMessage = "Analyzing speakers & generating audio previews..."
+                    val res = CloudApiClient.fetchDiarizePreview(context, u)
+                    isAnalyzingPreview = false
+                    res.onSuccess { data ->
+                        previewData = data
+                        selectedPreserveCluster = 0
+                        statusMessage = "Speakers analyzed! Play sample audio for Speaker A & Speaker B to choose which voice to preserve."
+                    }.onFailure { err ->
+                        statusMessage = "File selected. You can convert or retry speaker analysis."
+                        errorMessage = "Speaker analysis error: ${err.message ?: err.javaClass.simpleName}"
+                    }
+                    refreshLogs()
                 }
-                refreshLogs()
             }
+
+            triggerSpeakerPreview(uri)
         }
     }
 

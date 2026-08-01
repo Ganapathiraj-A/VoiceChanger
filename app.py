@@ -173,8 +173,9 @@ async def diarize_preview(file: UploadFile = File(...)):
     with open(temp_in, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
+    import asyncio
     from speaker_utils import generate_speaker_previews
-    stats = generate_speaker_previews(temp_in, preview_dir)
+    stats = await asyncio.to_thread(generate_speaker_previews, temp_in, preview_dir)
     PREVIEW_DB[preview_id] = {
         "dir": preview_dir,
         "stats": stats
