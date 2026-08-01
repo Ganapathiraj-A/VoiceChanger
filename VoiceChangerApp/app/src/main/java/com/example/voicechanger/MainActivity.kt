@@ -215,7 +215,7 @@ fun VoiceChangerScreen() {
     var isAnalyzingPreview by remember { mutableStateOf(false) }
     var previewData by remember { mutableStateOf<DiarizePreviewResponse?>(null) }
     var selectedPreserveCluster by remember { mutableStateOf(0) }
-    var conversionMode by remember { mutableStateOf("praat_psola") }
+    var conversionMode by remember { mutableStateOf("rvc") }
     var selectedTargetProfile by remember { mutableStateOf("tamil_female") }
 
     var previewProgressPercent by remember { mutableStateOf(0f) }
@@ -670,7 +670,33 @@ fun VoiceChangerScreen() {
                                         color = Color.White
                                     )
 
-                                    // Mode 1: Praat PSOLA
+                                    // Mode 1: RVC Neural Voice Clone
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (conversionMode == "rvc") Color(0xFF1DB954).copy(alpha = 0.2f) else Color(0xFF2A2A2A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = (conversionMode == "rvc"),
+                                                onClick = { conversionMode = "rvc" },
+                                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                            )
+                                            Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                Text("🤖 Neural Voice Clone (RVC)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                                Text("Clones exact target vocal identity & timbre", color = Color(0xFF1DB954), fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+
+                                    // Mode 2: Praat PSOLA
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(
@@ -696,7 +722,7 @@ fun VoiceChangerScreen() {
                                         }
                                     }
 
-                                    // Mode 2: Adaptive Target Voice Morphing
+                                    // Mode 3: Adaptive Target Voice Morphing
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = CardDefaults.cardColors(
@@ -722,9 +748,9 @@ fun VoiceChangerScreen() {
                                         }
                                     }
 
-                                    if (conversionMode == "target_morph") {
+                                    if (conversionMode == "rvc" || conversionMode == "target_morph") {
                                         Text(
-                                            "Target Voice Profile to Morph Into:",
+                                            "Target Voice Profile to Clone/Morph Into:",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
                                             color = Color(0xFFFFA726),

@@ -14,7 +14,7 @@ from speaker_utils import (
     cosine_similarity,
     suppress_background_noise
 )
-from voice_converter import convert_gender_auto, convert_voice_adaptive_target
+from voice_converter import convert_gender_auto, convert_voice_adaptive_target, convert_voice_rvc
 
 torch.set_num_threads(2)
 
@@ -201,7 +201,9 @@ def process_audio_file(
             seg_wav_out = os.path.join(temp_dir, f"block_{i}_out.wav")
             
             sf.write(seg_wav_in, block_audio, sr)
-            if conversion_mode == "target_morph":
+            if conversion_mode == "rvc":
+                success = convert_voice_rvc(seg_wav_in, seg_wav_out, target_profile_name=target_profile_name, target_gender=target_gender)
+            elif conversion_mode == "target_morph":
                 success = convert_voice_adaptive_target(seg_wav_in, seg_wav_out, target_profile_name=target_profile_name, target_gender=target_gender)
             else:
                 success = convert_gender_auto(seg_wav_in, seg_wav_out, target_gender=target_gender)
