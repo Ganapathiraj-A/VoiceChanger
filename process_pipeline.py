@@ -103,6 +103,7 @@ def process_audio_file(
             segment_embeddings.append(sim)
             
         # Calculate segment speech durations
+        sims_arr = np.array(segment_embeddings)
         durations = np.array([seg['end_sec'] - seg['start_sec'] for seg in valid_segments])
         total_speech_dur = np.sum(durations)
         min_preserved_dur = 0.10 * total_speech_dur  # Minimum 10% speech duration rule
