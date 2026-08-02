@@ -180,3 +180,92 @@ def convert_voice_rvc(audio_path: str, output_path: str, target_profile_name: st
     return convert_voice_adaptive_target(audio_path, output_path, target_profile_name=target_profile_name, target_gender=target_gender)
 
 
+def convert_voice_asr_tts(audio_path: str, output_path: str, target_profile_name: str = None, target_gender: str = "auto"):
+    """
+    ASR + TTS Full Voice Recreation Pipeline (Speech-to-Text-to-Speech):
+    1. Automatic Speech Recognition (ASR): Transcribes words & punctuation from input audio block.
+    2. Text-to-Speech (TTS): Regenerates 100% synthetic speech in the target speaker profile's voice,
+       removing original voice characteristics and background noise completely.
+    """
+    try:
+        import speech_recognition as sr
+        import asyncio
+        import edge_tts
+        from gtts import gTTS
+        
+        recognizer = sr.Recognizer()
+        text = ""
+        
+        wav_temp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
+        try:
+            y, sr_rate = librosa.load(audio_path, sr=16000, mono=True)
+            sf.write(wav_temp, y, sr_rate)
+            with sr.AudioFile(wav_temp) as source:
+                audio_data = recognizer.record(source)
+                try:
+                    text = recognizer.recognize_google(audio_data)
+                except Exception as e:
+                    print(f"[ASR] Google ASR recognition notice: {e}")
+        finally:
+            if os.path.exists(wav_temp):
+                os.remove(wav_temp)
+
+        if not text or len(text.strip()) == 0:
+            print("[ASR+TTS] No words recognized by ASR in segment, falling back to Adaptive Morphing.")
+            return convert_voice_adaptive_target(audio_path, output_path, target_profile_name=target_profile_name, target_gender=target_gender)
+
+        print(f"[ASR+TTS] Transcribed text ({len(text)} chars): '{text}'")
+
+        voice = "en-US-AnaNeural"
+        if target_profile_name:
+            t_lower = target_profile_name.lower()
+            if "tamil" in t_lower and "female" in t_lower:
+                voice = "ta-IN-PallaviNeural"
+            elif "tamil" in t_lower and "male" in t_lower:
+                voice = "ta-IN-ValluvarNeural"
+            elif "female" in t_lower or "woman" in t_lower:
+                voice = "en-US-AnaNeural"
+            elif "male" in t_lower or "man" in t_lower:
+                voice = "en-US-GuyNeural"
+        elif target_gender.lower() in ["male", "m"]:
+            voice = "en-US-GuyNeural"
+        else:
+            voice = "en-US-AnaNeural"
+
+        print(f"[ASR+TTS] Regenerating synthetic voice via Neural TTS Voice: '{voice}'...")
+        
+        temp_tts_mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
+        try:
+            async def _synth():
+                communicate = edge_tts.Communicate(text, voice)
+                await communicate.save(temp_tts_mp3)
+                
+            asyncio.run(_synth())
+            
+            if os.path.exists(temp_tts_mp3) and os.path.getsize(temp_tts_mp3) > 0:
+                y_tts, sr_tts = librosa.load(temp_tts_mp3, sr=16000, mono=True)
+                sf.write(output_path, y_tts, sr_tts)
+                print(f"[ASR+TTS] Successfully generated full synthetic voice recreation!")
+                return True
+        except Exception as e:
+            print(f"[ASR+TTS] EdgeTTS synthesis error: {e}, attempting gTTS fallback...")
+            try:
+                gtts_obj = gTTS(text=text, lang='en')
+                gtts_obj.save(temp_tts_mp3)
+                y_tts, sr_tts = librosa.load(temp_tts_mp3, sr=16000, mono=True)
+                sf.write(output_path, y_tts, sr_tts)
+                return True
+            except Exception as e2:
+                print(f"[ASR+TTS] gTTS fallback error: {e2}")
+        finally:
+            if os.path.exists(temp_tts_mp3):
+                os.remove(temp_tts_mp3)
+
+        return convert_voice_adaptive_target(audio_path, output_path, target_profile_name=target_profile_name, target_gender=target_gender)
+
+    except Exception as e:
+        print(f"[ASR+TTS] Overall ASR+TTS pipeline exception: {e}")
+        return convert_voice_adaptive_target(audio_path, output_path, target_profile_name=target_profile_name, target_gender=target_gender)
+
+
+

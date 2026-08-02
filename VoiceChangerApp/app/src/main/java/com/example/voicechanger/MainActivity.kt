@@ -994,8 +994,34 @@ fun VoiceChangerScreen() {
                                                 colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
                                             )
                                             Column(modifier = Modifier.padding(start = 4.dp)) {
-                                                Text("🎭 Adaptive Target Voice Morphing", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                                                Text("Morphs pitch & formants to match chosen profile", color = Color.LightGray, fontSize = 11.sp)
+                                                Text("🎯 Adaptive Target Voice Morphing", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                                Text("Dynamic F0 & formant envelope matching to target profile", color = Color.LightGray, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+
+                                    // Mode 4: ASR + TTS Speech Recreation
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (conversionMode == "asr_tts") Color(0xFF1DB954).copy(alpha = 0.2f) else Color(0xFF2A2A2A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = (conversionMode == "asr_tts"),
+                                                onClick = { conversionMode = "asr_tts" },
+                                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF1DB954))
+                                            )
+                                            Column(modifier = Modifier.padding(start = 4.dp)) {
+                                                Text("🗣️ Full Voice Recreation (ASR + TTS)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                                Text("Extracts words via ASR & regenerates 100% synthetic voice via Neural TTS", color = Color(0xFF25D366), fontSize = 11.sp)
                                             }
                                         }
                                     }
