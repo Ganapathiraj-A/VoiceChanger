@@ -21,8 +21,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download SpeechBrain ECAPA-TDNN model during build to eliminate Cloud Run cold start delay
+# Pre-download SpeechBrain ECAPA-TDNN and Faster-Whisper models during build to eliminate Cloud Run cold start delay
 RUN python3 -c "from speechbrain.inference.speaker import EncoderClassifier; EncoderClassifier.from_hparams(source='speechbrain/spkrec-ecapa-voxceleb', run_opts={'device': 'cpu'})"
+RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('tiny', device='cpu', compute_type='int8')"
 
 # Copy application source code and target profile
 COPY . .

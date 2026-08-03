@@ -180,42 +180,72 @@ def convert_voice_rvc(audio_path: str, output_path: str, target_profile_name: st
     return convert_voice_adaptive_target(audio_path, output_path, target_profile_name=target_profile_name, target_gender=target_gender)
 
 
+_whisper_model = None
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            from faster_whisper import WhisperModel
+            print("[ASR] Initializing Faster-Whisper Model ('tiny')...")
+            _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        except Exception as e:
+            print(f"[ASR] Faster-Whisper init error: {e}")
+            _whisper_model = False
+    return _whisper_model if _whisper_model is not False else None
+
+
 def convert_voice_asr_tts(audio_path: str, output_path: str, target_profile_name: str = None, target_gender: str = "auto"):
     """
-    ASR + TTS Full Voice Recreation Pipeline (Speech-to-Text-to-Speech):
-    1. Automatic Speech Recognition (ASR): Transcribes words & punctuation from input audio block.
-    2. Text-to-Speech (TTS): Regenerates 100% synthetic speech in the target speaker profile's voice,
-       removing original voice characteristics and background noise completely.
+    HD ASR + Neural TTS Voice Recreation (Whisper ASR + 24kHz HD Neural TTS):
+    1. Automatic Speech Recognition (ASR): Faster-Whisper transcribes words & punctuation from input audio block.
+    2. Text-to-Speech (TTS): Regenerates 24kHz HD synthetic speech in the target voice profile,
+       eliminating all original voice characteristics and background noise.
     """
     try:
-        import speech_recognition as sr
         import asyncio
         import edge_tts
         from gtts import gTTS
-        
-        recognizer = sr.Recognizer()
+
         text = ""
         
-        wav_temp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-        try:
-            y, sr_rate = librosa.load(audio_path, sr=16000, mono=True)
-            sf.write(wav_temp, y, sr_rate)
-            with sr.AudioFile(wav_temp) as source:
-                audio_data = recognizer.record(source)
+        # Step 1: Faster-Whisper ASR
+        w_model = get_whisper_model()
+        if w_model:
+            try:
+                segments, info = w_model.transcribe(audio_path, beam_size=5, vad_filter=True)
+                trans_text = " ".join([s.text.strip() for s in segments if s.text]).strip()
+                if trans_text:
+                    text = trans_text
+                    print(f"[ASR Whisper] Transcribed text ({len(text)} chars): '{text}'")
+            except Exception as e:
+                print(f"[ASR Whisper] Transcription notice: {e}")
+
+        # Fallback Step 1: Google SpeechRecognition if Whisper returned empty
+        if not text:
+            try:
+                import speech_recognition as sr
+                recognizer = sr.Recognizer()
+                wav_temp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
                 try:
-                    text = recognizer.recognize_google(audio_data)
-                except Exception as e:
-                    print(f"[ASR] Google ASR recognition notice: {e}")
-        finally:
-            if os.path.exists(wav_temp):
-                os.remove(wav_temp)
+                    y, sr_rate = librosa.load(audio_path, sr=16000, mono=True)
+                    sf.write(wav_temp, y, sr_rate)
+                    with sr.AudioFile(wav_temp) as source:
+                        audio_data = recognizer.record(source)
+                        text = recognizer.recognize_google(audio_data)
+                        if text:
+                            print(f"[ASR Google] Transcribed text ({len(text)} chars): '{text}'")
+                finally:
+                    if os.path.exists(wav_temp):
+                        os.remove(wav_temp)
+            except Exception as e:
+                print(f"[ASR Google] Recognition notice: {e}")
 
         if not text or len(text.strip()) == 0:
             print("[ASR+TTS] No words recognized by ASR in segment, falling back to Adaptive Morphing.")
             return convert_voice_adaptive_target(audio_path, output_path, target_profile_name=target_profile_name, target_gender=target_gender)
 
-        print(f"[ASR+TTS] Transcribed text ({len(text)} chars): '{text}'")
-
+        # Step 2: Select Neural HD Voice Model
         voice = "en-US-AnaNeural"
         if target_profile_name:
             t_lower = target_profile_name.lower()
@@ -232,27 +262,34 @@ def convert_voice_asr_tts(audio_path: str, output_path: str, target_profile_name
         else:
             voice = "en-US-AnaNeural"
 
-        print(f"[ASR+TTS] Regenerating synthetic voice via Neural TTS Voice: '{voice}'...")
-        
+        print(f"[ASR+TTS] Regenerating 24kHz HD synthetic voice via Neural Voice: '{voice}'...")
+
         temp_tts_mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
         try:
             async def _synth():
                 communicate = edge_tts.Communicate(text, voice)
                 await communicate.save(temp_tts_mp3)
-                
+
             asyncio.run(_synth())
-            
+
             if os.path.exists(temp_tts_mp3) and os.path.getsize(temp_tts_mp3) > 0:
-                y_tts, sr_tts = librosa.load(temp_tts_mp3, sr=16000, mono=True)
+                # 24kHz HD Resampling & Volume Peak Normalization
+                y_tts, sr_tts = librosa.load(temp_tts_mp3, sr=24000, mono=True)
+                max_peak = float(np.max(np.abs(y_tts)))
+                if max_peak > 0:
+                    y_tts = (y_tts / max_peak) * 0.90
                 sf.write(output_path, y_tts, sr_tts)
-                print(f"[ASR+TTS] Successfully generated full synthetic voice recreation!")
+                print(f"[ASR+TTS] Successfully generated 24kHz HD synthetic voice recreation!")
                 return True
         except Exception as e:
             print(f"[ASR+TTS] EdgeTTS synthesis error: {e}, attempting gTTS fallback...")
             try:
                 gtts_obj = gTTS(text=text, lang='en')
                 gtts_obj.save(temp_tts_mp3)
-                y_tts, sr_tts = librosa.load(temp_tts_mp3, sr=16000, mono=True)
+                y_tts, sr_tts = librosa.load(temp_tts_mp3, sr=24000, mono=True)
+                max_peak = float(np.max(np.abs(y_tts)))
+                if max_peak > 0:
+                    y_tts = (y_tts / max_peak) * 0.90
                 sf.write(output_path, y_tts, sr_tts)
                 return True
             except Exception as e2:

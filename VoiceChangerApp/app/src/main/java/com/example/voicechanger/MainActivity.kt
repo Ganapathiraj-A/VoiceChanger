@@ -34,8 +34,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -192,39 +194,48 @@ fun VoiceChangerScreen() {
     var logText by remember { mutableStateOf("No logs") }
 
     fun refreshLogs() {
-        logText = LogManager.getLogContent(context)
+        coroutineScope.launch(Dispatchers.IO) {
+            val content = LogManager.getLogContent(context)
+            withContext(Dispatchers.Main) {
+                logText = content
+            }
+        }
     }
 
     val historyFiles = remember { mutableStateListOf<File>() }
 
     fun refreshHistory() {
-        historyFiles.clear()
-        val allFiles = mutableListOf<File>()
+        coroutineScope.launch(Dispatchers.IO) {
+            val allFiles = mutableListOf<File>()
 
-        val candidateDirs = listOf(
-            File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "VoiceChanger"),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "VoiceChanger"),
-            File(Environment.getExternalStorageDirectory(), "Music/VoiceChanger"),
-            File(context.filesDir, "VoiceChanger"),
-            File(context.cacheDir, "VoiceChanger")
-        )
+            val candidateDirs = listOf(
+                File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "VoiceChanger"),
+                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "VoiceChanger"),
+                File(Environment.getExternalStorageDirectory(), "Music/VoiceChanger"),
+                File(context.filesDir, "VoiceChanger"),
+                File(context.cacheDir, "VoiceChanger")
+            )
 
-        for (dir in candidateDirs) {
-            if (dir.exists() && dir.isDirectory) {
-                val files = dir.listFiles { file ->
-                    file.isFile && (file.name.endsWith(".mp3", true) || file.name.endsWith(".wav", true) || file.name.endsWith(".m4a", true) || file.name.endsWith(".aac", true) || file.name.endsWith(".3gp", true))
-                }
-                if (files != null) {
-                    allFiles.addAll(files)
+            for (dir in candidateDirs) {
+                if (dir.exists() && dir.isDirectory) {
+                    val files = dir.listFiles { file ->
+                        file.isFile && (file.name.endsWith(".mp3", true) || file.name.endsWith(".wav", true) || file.name.endsWith(".m4a", true) || file.name.endsWith(".aac", true) || file.name.endsWith(".3gp", true))
+                    }
+                    if (files != null) {
+                        allFiles.addAll(files)
+                    }
                 }
             }
+
+            val sortedUnique = allFiles
+                .distinctBy { it.name }
+                .sortedByDescending { it.lastModified() }
+
+            withContext(Dispatchers.Main) {
+                historyFiles.clear()
+                historyFiles.addAll(sortedUnique)
+            }
         }
-
-        val sortedUnique = allFiles
-            .distinctBy { it.name }
-            .sortedByDescending { it.lastModified() }
-
-        historyFiles.addAll(sortedUnique)
     }
 
     val prefs = remember { context.getSharedPreferences("voice_changer_settings", Context.MODE_PRIVATE) }
@@ -272,59 +283,63 @@ fun VoiceChangerScreen() {
     }
 
     fun scanAndSelectLatestCallRecording() {
-        try {
-            var latestUri: Uri? = null
-            var latestName: String? = null
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                var latestUri: Uri? = null
+                var latestName: String? = null
 
-            if (!defaultFolderUriStr.isNullOrBlank()) {
-                val treeUri = Uri.parse(defaultFolderUriStr)
-                val docFolder = DocumentFile.fromTreeUri(context, treeUri)
-                if (docFolder != null && docFolder.isDirectory) {
-                    val audioDoc = docFolder.listFiles()
-                        .filter { file ->
-                            val n = file.name ?: ""
-                            file.isFile && (n.endsWith(".mp3", true) || n.endsWith(".m4a", true) || n.endsWith(".wav", true) || n.endsWith(".3gp", true) || n.endsWith(".aac", true) || n.endsWith(".mp4", true))
+                if (!defaultFolderUriStr.isNullOrBlank()) {
+                    val treeUri = Uri.parse(defaultFolderUriStr)
+                    val docFolder = DocumentFile.fromTreeUri(context, treeUri)
+                    if (docFolder != null && docFolder.isDirectory) {
+                        val audioDoc = docFolder.listFiles()
+                            .filter { file ->
+                                val n = file.name ?: ""
+                                file.isFile && (n.endsWith(".mp3", true) || n.endsWith(".m4a", true) || n.endsWith(".wav", true) || n.endsWith(".3gp", true) || n.endsWith(".aac", true) || n.endsWith(".mp4", true))
+                            }
+                            .maxByOrNull { it.lastModified() }
+
+                        if (audioDoc != null) {
+                            latestUri = audioDoc.uri
+                            latestName = audioDoc.name
                         }
-                        .maxByOrNull { it.lastModified() }
-
-                    if (audioDoc != null) {
-                        latestUri = audioDoc.uri
-                        latestName = audioDoc.name
                     }
                 }
-            }
 
-            if (latestUri == null) {
-                val candidates = listOf(
-                    File("/storage/emulated/0/Recordings/Call"),
-                    File("/storage/emulated/0/CallRecordings"),
-                    File("/storage/emulated/0/MIUI/sound_recorder/call_rec"),
-                    File("/storage/emulated/0/Recordings"),
-                    File("/storage/emulated/0/Music"),
-                    File("/storage/emulated/0/Download")
-                )
-                val candidateFiles = candidates
-                    .filter { it.exists() && it.isDirectory }
-                    .flatMap { dir ->
-                        dir.listFiles { f ->
-                            f.isFile && (f.name.endsWith(".mp3", true) || f.name.endsWith(".m4a", true) || f.name.endsWith(".wav", true) || f.name.endsWith(".3gp", true) || f.name.endsWith(".aac", true) || f.name.endsWith(".mp4", true))
-                        }?.toList() ?: emptyList()
+                if (latestUri == null) {
+                    val candidates = listOf(
+                        File("/storage/emulated/0/Recordings/Call"),
+                        File("/storage/emulated/0/CallRecordings"),
+                        File("/storage/emulated/0/MIUI/sound_recorder/call_rec"),
+                        File("/storage/emulated/0/Recordings"),
+                        File("/storage/emulated/0/Music"),
+                        File("/storage/emulated/0/Download")
+                    )
+                    val candidateFiles = candidates
+                        .filter { it.exists() && it.isDirectory }
+                        .flatMap { dir ->
+                            dir.listFiles { f ->
+                                f.isFile && (f.name.endsWith(".mp3", true) || f.name.endsWith(".m4a", true) || f.name.endsWith(".wav", true) || f.name.endsWith(".3gp", true) || f.name.endsWith(".aac", true) || f.name.endsWith(".mp4", true))
+                            }?.toList() ?: emptyList()
+                        }
+                    val latestFile = candidateFiles.maxByOrNull { it.lastModified() }
+                    if (latestFile != null) {
+                        latestUri = Uri.fromFile(latestFile)
+                        latestName = latestFile.name
                     }
-                val latestFile = candidateFiles.maxByOrNull { it.lastModified() }
-                if (latestFile != null) {
-                    latestUri = Uri.fromFile(latestFile)
-                    latestName = latestFile.name
                 }
-            }
 
-            if (latestUri != null) {
-                selectedFileUri = latestUri
-                selectedFileName = latestName ?: "Latest Call Recording"
-                statusMessage = "Auto-selected latest call recording: $selectedFileName"
-                LogManager.i(context, "AUTO", "Auto-selected latest audio recording: $selectedFileName ($latestUri)")
+                if (latestUri != null) {
+                    withContext(Dispatchers.Main) {
+                        selectedFileUri = latestUri
+                        selectedFileName = latestName ?: "Latest Call Recording"
+                        statusMessage = "Auto-selected latest call recording: $selectedFileName"
+                    }
+                    LogManager.i(context, "AUTO", "Auto-selected latest audio recording: $selectedFileName ($latestUri)")
+                }
+            } catch (e: Exception) {
+                LogManager.e(context, "AUTO", "Error scanning for latest recording: ${e.message}", e)
             }
-        } catch (e: Exception) {
-            LogManager.e(context, "AUTO", "Error scanning for latest recording: ${e.message}", e)
         }
     }
 

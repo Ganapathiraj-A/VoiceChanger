@@ -13,3 +13,7 @@ python-multipart>=0.0.9
 pydantic>=2.6.0
 tqdm>=4.66.0
 noisereduce>=3.0.0
+faster-whisper>=1.0.0
+edge-tts>=6.1.9
+gTTS>=2.5.0
+SpeechRecognition>=3.10.0
